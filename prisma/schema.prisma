@@ -1,0 +1,484 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// AUTH & USER
+// ============================================
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Better Auth fields
+  name          String?
+  emailVerified Boolean   @default(false)
+  image         String?
+
+  // Business flag
+  isBusiness Boolean @default(false)
+
+  // Stripe
+  stripeCustomerId     String?              @unique
+  stripeSubscriptionId String?
+  subscriptionStatus   SubscriptionStatus   @default(FREE)
+
+  // Relations
+  profile           Profile?
+  sessions          Session[]
+  accounts          Account[]
+  createdServices   Service[]
+  bookingsAsRequester Booking[] @relation("BookingRequester")
+  bookingsAsProvider  Booking[] @relation("BookingProvider")
+  reviewsWritten    Review[]  @relation("ReviewAuthor")
+  reviewsReceived   Review[]  @relation("ReviewTarget")
+  reputation        UserReputation?
+
+  // Business relations
+  ownedBusiness     Business?
+  employeeAt        Employee?
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  idToken               String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ============================================
+// BUSINESS
+// ============================================
+
+model Business {
+  id          String   @id @default(cuid())
+  ownerId     String   @unique
+  name        String
+  slug        String   @unique
+  description String?
+  logoUrl     String?
+  coverUrl    String?
+
+  // Contact
+  phone   String?
+  email   String?
+  website String?
+
+  // Address
+  address    String?
+  city       String?
+  postalCode String?
+  country    String   @default("FR")
+  latitude   Float?
+  longitude  Float?
+
+  // Subscription
+  subscriptionTier   BusinessTier   @default(STARTER)
+  subscriptionStatus SubscriptionStatus @default(FREE)
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+
+  // Settings
+  isVerified    Boolean @default(false)
+  isActive      Boolean @default(true)
+  acceptsOnlineBooking Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  owner     User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  employees Employee[]
+  services  BusinessService[]
+
+  @@index([city])
+}
+
+model Employee {
+  id         String  @id @default(cuid())
+  businessId String
+  userId     String? @unique // Optional: can be linked to a user account
+
+  firstName  String
+  lastName   String
+  email      String?
+  phone      String?
+  avatarUrl  String?
+  role       String? // e.g. "Coiffeur", "Masseur", etc.
+  bio        String?
+
+  isActive   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business       Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user           User?                 @relation(fields: [userId], references: [id])
+  availabilities EmployeeAvailability[]
+  services       EmployeeService[]
+  bookings       Booking[]
+
+  @@index([businessId])
+}
+
+model EmployeeAvailability {
+  id         String @id @default(cuid())
+  employeeId String
+
+  dayOfWeek  Int    // 0 = Sunday, 1 = Monday, etc.
+  startTime  String // "09:00"
+  endTime    String // "18:00"
+
+  // Relations
+  employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, dayOfWeek])
+}
+
+model BusinessService {
+  id          String @id @default(cuid())
+  businessId  String
+
+  name        String
+  description String?
+
+  // Pricing
+  priceCents  Int
+  currency    String @default("EUR")
+
+  // Duration in minutes
+  durationMinutes Int
+
+  // Category
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  isActive   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business  Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employees EmployeeService[]
+  bookings  Booking[]
+
+  @@index([businessId])
+  @@index([categoryId])
+}
+
+model EmployeeService {
+  employeeId        String
+  businessServiceId String
+
+  // Relations
+  employee        Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  businessService BusinessService @relation(fields: [businessServiceId], references: [id], onDelete: Cascade)
+
+  @@id([employeeId, businessServiceId])
+}
+
+// ============================================
+// PROFILE
+// ============================================
+
+model Profile {
+  userId      String  @id
+  displayName String?
+  avatarUrl   String?
+  bio         String?
+  city        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// SERVICE
+// ============================================
+
+model Service {
+  id          String        @id @default(cuid())
+  kind        ServiceKind
+  title       String
+  description String
+
+  // Pricing
+  priceMinCents Int?
+  priceMaxCents Int?
+  currency      String @default("EUR")
+
+  // Duration (in minutes)
+  durationMinutes Int?
+
+  // Availability
+  availableDays     String[] // e.g. ["MONDAY", "TUESDAY", "WEDNESDAY"]
+  availableFromTime String?  // e.g. "09:00"
+  availableToTime   String?  // e.g. "18:00"
+  availableFromDate DateTime?
+  availableToDate   DateTime?
+
+  // Location
+  city      String?
+  latitude  Float?
+  longitude Float?
+
+  // Category & Tags
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+  tags       ServiceTag[]
+
+  // Owner
+  createdByUserId String
+  createdBy       User   @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+
+  // Status
+  status ServiceStatus @default(DRAFT)
+
+  // Time
+  deadlineAt DateTime?
+  expiresAt  DateTime
+
+  // Urgency
+  urgency Urgency @default(FLEXIBLE)
+
+  // Recurrence
+  isRecurring    Boolean     @default(false)
+  recurrence     Recurrence  @default(ONE_TIME)
+  sessionsCount  Int?
+
+  // Boost
+  boostedUntil DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  bookings Booking[]
+
+  @@index([kind])
+  @@index([status])
+  @@index([categoryId])
+  @@index([createdByUserId])
+  @@index([expiresAt])
+  @@index([boostedUntil])
+  @@index([city])
+  @@index([latitude, longitude])
+}
+
+model Category {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique
+  parentId String?
+
+  parent           Category?         @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children         Category[]        @relation("CategoryHierarchy")
+  services         Service[]
+  businessServices BusinessService[]
+}
+
+model Tag {
+  id   String @id @default(cuid())
+  name String @unique
+
+  services ServiceTag[]
+}
+
+model ServiceTag {
+  serviceId String
+  tagId     String
+
+  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([serviceId, tagId])
+}
+
+// ============================================
+// BOOKING
+// ============================================
+
+model Booking {
+  id        String @id @default(cuid())
+
+  // For P2P bookings (individual services)
+  serviceId   String?
+  requesterId String
+  providerId  String
+
+  // For Business bookings
+  businessServiceId String?
+  employeeId        String?
+
+  status BookingStatus @default(PENDING)
+
+  agreedPriceCents Int?
+  scheduledAt      DateTime?
+  scheduledEndAt   DateTime? // For business bookings with duration
+  completedAt      DateTime?
+
+  // Client notes
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  service         Service?         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  businessService BusinessService? @relation(fields: [businessServiceId], references: [id], onDelete: Cascade)
+  employee        Employee?        @relation(fields: [employeeId], references: [id])
+  requester       User             @relation("BookingRequester", fields: [requesterId], references: [id])
+  provider        User             @relation("BookingProvider", fields: [providerId], references: [id])
+  reviews         Review[]
+
+  @@index([serviceId])
+  @@index([businessServiceId])
+  @@index([employeeId])
+  @@index([requesterId])
+  @@index([providerId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+// ============================================
+// REVIEW
+// ============================================
+
+model Review {
+  id           String     @id @default(cuid())
+  bookingId    String
+  authorId     String
+  targetUserId String
+  type         ReviewType
+  score        Int        // 0-10
+  comment      String?
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  author     User    @relation("ReviewAuthor", fields: [authorId], references: [id])
+  targetUser User    @relation("ReviewTarget", fields: [targetUserId], references: [id])
+
+  @@unique([bookingId, type])
+  @@index([targetUserId])
+}
+
+// ============================================
+// REPUTATION
+// ============================================
+
+model UserReputation {
+  userId      String @id
+  ratingAvg10 Float  @default(0)
+  ratingCount Int    @default(0)
+  xp          Int    @default(0)
+  level       Int    @default(1)
+  trustScore  Float  @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum SubscriptionStatus {
+  FREE
+  PRO
+  CANCELED
+}
+
+enum ServiceKind {
+  OFFER
+  REQUEST
+}
+
+enum ServiceStatus {
+  DRAFT
+  PUBLISHED
+  PAUSED
+}
+
+enum Urgency {
+  URGENT
+  SOON
+  FLEXIBLE
+}
+
+enum Recurrence {
+  ONE_TIME
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+enum BookingStatus {
+  PENDING
+  ACCEPTED
+  IN_PROGRESS
+  COMPLETED
+  CANCELED
+  DISPUTED
+}
+
+enum ReviewType {
+  REVIEW_PROVIDER
+  REVIEW_REQUESTER
+}
+
+enum BusinessTier {
+  STARTER   // Free tier - limited features
+  PRO       // Monthly subscription - full features
+  PREMIUM   // Premium features + priority support
+}

@@ -83,15 +83,16 @@ export class ReviewsService {
     if (reputation) {
       const newCount = reputation.ratingCount + 1;
       const newAvg =
-        (reputation.ratingAvg10 * reputation.ratingCount + newScore) / newCount;
+        (reputation.ratingAvg5 * reputation.ratingCount + newScore) / newCount;
 
       // Calculate trust score (simplified: based on rating and count)
-      const trustScore = Math.min(100, newAvg * 8 + Math.log(newCount + 1) * 5);
+      // Score is now 1-5, so multiply by 16 instead of 8 to keep same scale
+      const trustScore = Math.min(100, newAvg * 16 + Math.log(newCount + 1) * 5);
 
       await this.prisma.userReputation.update({
         where: { userId },
         data: {
-          ratingAvg10: newAvg,
+          ratingAvg5: newAvg,
           ratingCount: newCount,
           trustScore,
         },
@@ -100,9 +101,9 @@ export class ReviewsService {
       await this.prisma.userReputation.create({
         data: {
           userId,
-          ratingAvg10: newScore,
+          ratingAvg5: newScore,
           ratingCount: 1,
-          trustScore: newScore * 8,
+          trustScore: newScore * 16,
         },
       });
     }
@@ -138,10 +139,88 @@ export class ReviewsService {
         booking: {
           select: {
             service: { select: { title: true } },
+            businessService: { select: { name: true } },
           },
         },
       },
       orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findByBusiness(businessId: string) {
+    // Find the business to get the owner ID
+    const business = await this.prisma.business.findUnique({
+      where: { id: businessId },
+      select: { ownerId: true },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business not found');
+    }
+
+    // Find all reviews targeting the business owner for business bookings
+    return this.prisma.review.findMany({
+      where: {
+        targetUserId: business.ownerId,
+        booking: {
+          businessServiceId: { not: null },
+        },
+      },
+      include: {
+        author: {
+          select: {
+            id: true,
+            profile: { select: { displayName: true, avatarUrl: true } },
+          },
+        },
+        booking: {
+          select: {
+            businessService: {
+              select: { name: true },
+            },
+            employee: {
+              select: { firstName: true, lastName: true },
+            },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async replyToReview(userId: string, reviewId: string, reply: string) {
+    const review = await this.prisma.review.findUnique({
+      where: { id: reviewId },
+      include: {
+        booking: {
+          include: {
+            businessService: {
+              include: { business: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!review) {
+      throw new NotFoundException('Review not found');
+    }
+
+    // Check that the user is the business owner
+    if (!review.booking.businessService?.business) {
+      throw new BadRequestException('Can only reply to business reviews');
+    }
+
+    if (review.booking.businessService.business.ownerId !== userId) {
+      throw new ForbiddenException('Only the business owner can reply to reviews');
+    }
+
+    return this.prisma.review.update({
+      where: { id: reviewId },
+      data: {
+        reply,
+        repliedAt: new Date(),
+      },
     });
   }
 }

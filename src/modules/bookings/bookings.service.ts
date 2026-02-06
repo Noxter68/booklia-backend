@@ -13,6 +13,16 @@ export class BookingsService {
   constructor(private prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateBookingDto) {
+    // Business booking
+    if (dto.businessServiceId && dto.employeeId) {
+      return this.createBusinessBooking(userId, dto);
+    }
+
+    // P2P booking
+    if (!dto.serviceId) {
+      throw new BadRequestException('serviceId is required for P2P bookings');
+    }
+
     const service = await this.prisma.service.findUnique({
       where: { id: dto.serviceId },
       include: { createdBy: true },
@@ -50,6 +60,76 @@ export class BookingsService {
       },
       include: {
         service: true,
+        requester: {
+          select: {
+            id: true,
+            profile: { select: { displayName: true, avatarUrl: true } },
+          },
+        },
+        provider: {
+          select: {
+            id: true,
+            profile: { select: { displayName: true, avatarUrl: true } },
+          },
+        },
+      },
+    });
+  }
+
+  private async createBusinessBooking(userId: string, dto: CreateBookingDto) {
+    // Fetch business service
+    const businessService = await this.prisma.businessService.findUnique({
+      where: { id: dto.businessServiceId },
+      include: {
+        business: {
+          include: { owner: true },
+        },
+      },
+    });
+
+    if (!businessService) {
+      throw new NotFoundException('Business service not found');
+    }
+
+    // Fetch employee
+    const employee = await this.prisma.employee.findUnique({
+      where: { id: dto.employeeId },
+    });
+
+    if (!employee) {
+      throw new NotFoundException('Employee not found');
+    }
+
+    if (employee.businessId !== businessService.businessId) {
+      throw new BadRequestException('Employee does not belong to this business');
+    }
+
+    // Calculate scheduledEndAt based on service duration
+    let scheduledAt: Date | undefined;
+    let scheduledEndAt: Date | undefined;
+    if (dto.scheduledAt) {
+      scheduledAt = new Date(dto.scheduledAt);
+      scheduledEndAt = new Date(scheduledAt.getTime() + businessService.durationMinutes * 60000);
+    }
+
+    // The requester is the user booking, the provider is the business owner
+    return this.prisma.booking.create({
+      data: {
+        requesterId: userId,
+        providerId: businessService.business.ownerId,
+        businessServiceId: dto.businessServiceId,
+        employeeId: dto.employeeId,
+        agreedPriceCents: businessService.priceCents,
+        scheduledAt,
+        scheduledEndAt,
+      },
+      include: {
+        businessService: {
+          include: {
+            business: true,
+          },
+        },
+        employee: true,
         requester: {
           select: {
             id: true,
@@ -155,9 +235,22 @@ export class BookingsService {
     return this.prisma.booking.findMany({
       where,
       include: {
+        // P2P booking relations
         service: {
           select: { id: true, title: true, kind: true },
         },
+        // Business booking relations
+        businessService: {
+          include: {
+            business: {
+              select: { id: true, name: true, slug: true, address: true, city: true },
+            },
+          },
+        },
+        employee: {
+          select: { id: true, firstName: true, lastName: true, avatarUrl: true },
+        },
+        // Common relations
         requester: {
           select: {
             id: true,

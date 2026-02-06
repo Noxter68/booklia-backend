@@ -397,8 +397,10 @@ model Review {
   authorId     String
   targetUserId String
   type         ReviewType
-  score        Int        // 0-10
+  score        Int        // 1-5
   comment      String?
+  reply        String?    // Business owner reply
+  repliedAt    DateTime?
 
   createdAt DateTime @default(now())
 
@@ -416,8 +418,8 @@ model Review {
 // ============================================
 
 model UserReputation {
-  userId      String @id
-  ratingAvg10 Float  @default(0)
+  userId     String @id
+  ratingAvg5 Float  @default(0)
   ratingCount Int    @default(0)
   xp          Int    @default(0)
   level       Int    @default(1)

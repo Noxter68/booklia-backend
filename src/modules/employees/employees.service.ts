@@ -204,7 +204,9 @@ export class EmployeesService {
       throw new NotFoundException('Service non trouvé');
     }
 
-    const targetDate = new Date(date);
+    // Parse date as local time (add T00:00:00 to avoid UTC interpretation)
+    const [year, month, day] = date.split('-').map(Number);
+    const targetDate = new Date(year, month - 1, day);
     const dayOfWeek = targetDate.getDay();
 
     // Find availability for this day
@@ -217,10 +219,8 @@ export class EmployeesService {
     }
 
     // Get existing bookings for this employee on this date
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
+    const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
+    const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
 
     const existingBookings = await this.prisma.booking.findMany({
       where: {
@@ -231,6 +231,11 @@ export class EmployeesService {
         },
         status: {
           in: ['PENDING', 'ACCEPTED', 'IN_PROGRESS'],
+        },
+      },
+      include: {
+        businessService: {
+          select: { durationMinutes: true },
         },
       },
     });
@@ -252,14 +257,19 @@ export class EmployeesService {
       const timeStr = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
 
       // Check if slot conflicts with existing booking
-      const slotStart = new Date(date);
-      slotStart.setHours(hour, min, 0, 0);
+      const slotStart = new Date(year, month - 1, day, hour, min, 0, 0);
       const slotEnd = new Date(slotStart.getTime() + slotDuration * 60000);
 
       const isBooked = existingBookings.some((booking) => {
-        if (!booking.scheduledAt || !booking.scheduledEndAt) return false;
+        if (!booking.scheduledAt) return false;
+        // Calculate scheduledEndAt if not set (for old bookings)
+        let bookingEnd = booking.scheduledEndAt;
+        if (!bookingEnd && booking.businessService?.durationMinutes) {
+          bookingEnd = new Date(booking.scheduledAt.getTime() + booking.businessService.durationMinutes * 60000);
+        }
+        if (!bookingEnd) return false;
         return (
-          slotStart < booking.scheduledEndAt && slotEnd > booking.scheduledAt
+          slotStart < bookingEnd && slotEnd > booking.scheduledAt
         );
       });
 

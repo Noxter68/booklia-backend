@@ -47,8 +47,10 @@ export class BookingsController {
   async findMyBookings(
     @CurrentUser() user: User,
     @Query('role') role?: 'requester' | 'provider',
+    @Query('from') from?: string,
+    @Query('to') to?: string,
   ) {
-    return this.bookingsService.findByUser(user.id, role);
+    return this.bookingsService.findByUser(user.id, role, from, to);
   }
 
   @Get(':id')

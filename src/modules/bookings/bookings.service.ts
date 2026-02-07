@@ -221,7 +221,7 @@ export class BookingsService {
     });
   }
 
-  async findByUser(userId: string, role?: 'requester' | 'provider') {
+  async findByUser(userId: string, role?: 'requester' | 'provider', from?: string, to?: string) {
     const where: any = {};
 
     if (role === 'requester') {
@@ -230,6 +230,17 @@ export class BookingsService {
       where.providerId = userId;
     } else {
       where.OR = [{ requesterId: userId }, { providerId: userId }];
+    }
+
+    // Date filtering on scheduledAt
+    if (from || to) {
+      where.scheduledAt = {};
+      if (from) {
+        where.scheduledAt.gte = new Date(from);
+      }
+      if (to) {
+        where.scheduledAt.lte = new Date(to);
+      }
     }
 
     return this.prisma.booking.findMany({

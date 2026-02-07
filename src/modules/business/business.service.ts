@@ -11,6 +11,9 @@ import {
   CreateBusinessServiceDto,
   UpdateBusinessServiceDto,
   SearchBusinessDto,
+  UpdateBusinessHoursDto,
+  CreateBusinessCategoryDto,
+  UpdateBusinessCategoryDto,
 } from './dto/business.dto';
 
 @Injectable()
@@ -92,7 +95,14 @@ export class BusinessService {
           where: { isActive: true },
           include: {
             category: true,
+            businessCategory: true,
           },
+        },
+        hours: {
+          orderBy: { dayOfWeek: 'asc' },
+        },
+        categories: {
+          orderBy: { sortOrder: 'asc' },
         },
       },
     });
@@ -130,7 +140,14 @@ export class BusinessService {
           where: { isActive: true },
           include: {
             category: true,
+            businessCategory: true,
           },
+        },
+        hours: {
+          orderBy: { dayOfWeek: 'asc' },
+        },
+        categories: {
+          orderBy: { sortOrder: 'asc' },
         },
       },
     });
@@ -343,5 +360,159 @@ export class BusinessService {
         },
       },
     });
+  }
+
+  // ============================================
+  // BUSINESS HOURS
+  // ============================================
+
+  async getHours(businessId: string) {
+    return this.prisma.businessHours.findMany({
+      where: { businessId },
+      orderBy: { dayOfWeek: 'asc' },
+    });
+  }
+
+  async getHoursBySlug(slug: string) {
+    const business = await this.prisma.business.findUnique({
+      where: { slug },
+      select: { id: true },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    return this.prisma.businessHours.findMany({
+      where: { businessId: business.id },
+      orderBy: { dayOfWeek: 'asc' },
+    });
+  }
+
+  async updateHours(userId: string, dto: UpdateBusinessHoursDto) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    // Delete existing hours and create new ones in a transaction
+    await this.prisma.$transaction([
+      this.prisma.businessHours.deleteMany({
+        where: { businessId: business.id },
+      }),
+      ...dto.hours.map((hour) =>
+        this.prisma.businessHours.create({
+          data: {
+            businessId: business.id,
+            dayOfWeek: hour.dayOfWeek,
+            startTime: hour.startTime,
+            endTime: hour.endTime,
+            isClosed: hour.isClosed || false,
+          },
+        }),
+      ),
+    ]);
+
+    return this.getHours(business.id);
+  }
+
+  // ============================================
+  // BUSINESS CATEGORIES
+  // ============================================
+
+  async getCategories(businessId: string) {
+    return this.prisma.businessCategory.findMany({
+      where: { businessId },
+      orderBy: { sortOrder: 'asc' },
+      include: {
+        _count: {
+          select: { services: true },
+        },
+      },
+    });
+  }
+
+  async createCategory(userId: string, dto: CreateBusinessCategoryDto) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    // Get max sortOrder
+    const maxSort = await this.prisma.businessCategory.aggregate({
+      where: { businessId: business.id },
+      _max: { sortOrder: true },
+    });
+
+    return this.prisma.businessCategory.create({
+      data: {
+        businessId: business.id,
+        name: dto.name,
+        sortOrder: dto.sortOrder ?? (maxSort._max.sortOrder ?? 0) + 1,
+      },
+    });
+  }
+
+  async updateCategory(
+    userId: string,
+    categoryId: string,
+    dto: UpdateBusinessCategoryDto,
+  ) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    const category = await this.prisma.businessCategory.findUnique({
+      where: { id: categoryId },
+    });
+
+    if (!category || category.businessId !== business.id) {
+      throw new ForbiddenException('Accès refusé');
+    }
+
+    return this.prisma.businessCategory.update({
+      where: { id: categoryId },
+      data: dto,
+    });
+  }
+
+  async deleteCategory(userId: string, categoryId: string) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    const category = await this.prisma.businessCategory.findUnique({
+      where: { id: categoryId },
+    });
+
+    if (!category || category.businessId !== business.id) {
+      throw new ForbiddenException('Accès refusé');
+    }
+
+    // Remove category from all services before deleting
+    await this.prisma.businessService.updateMany({
+      where: { businessCategoryId: categoryId },
+      data: { businessCategoryId: null },
+    });
+
+    await this.prisma.businessCategory.delete({
+      where: { id: categoryId },
+    });
+
+    return { success: true };
   }
 }

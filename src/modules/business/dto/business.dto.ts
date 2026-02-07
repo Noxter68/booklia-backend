@@ -9,6 +9,8 @@ import {
   IsEmail,
   IsUrl,
   ValidateIf,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { BusinessTier } from '@prisma/client';
@@ -158,6 +160,10 @@ export class CreateBusinessServiceDto {
   @IsString()
   @IsOptional()
   categoryId?: string;
+
+  @IsString()
+  @IsOptional()
+  businessCategoryId?: string;
 }
 
 export class UpdateBusinessServiceDto {
@@ -188,6 +194,10 @@ export class UpdateBusinessServiceDto {
   @IsOptional()
   categoryId?: string;
 
+  @IsString()
+  @IsOptional()
+  businessCategoryId?: string;
+
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
@@ -215,4 +225,57 @@ export class SearchBusinessDto {
   @IsNumber()
   @IsOptional()
   offset?: number;
+}
+
+// ============================================
+// BUSINESS HOURS
+// ============================================
+
+export class BusinessHourDto {
+  @IsNumber()
+  dayOfWeek: number; // 0 = Sunday, 1 = Monday, etc.
+
+  @IsString()
+  startTime: string; // "09:00"
+
+  @IsString()
+  endTime: string; // "18:00"
+
+  @IsBoolean()
+  @IsOptional()
+  isClosed?: boolean;
+}
+
+export class UpdateBusinessHoursDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => BusinessHourDto)
+  hours: BusinessHourDto[];
+}
+
+// ============================================
+// BUSINESS CATEGORIES
+// ============================================
+
+export class CreateBusinessCategoryDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(100)
+  name: string;
+
+  @IsNumber()
+  @IsOptional()
+  sortOrder?: number;
+}
+
+export class UpdateBusinessCategoryDto {
+  @IsString()
+  @IsOptional()
+  @MinLength(2)
+  @MaxLength(100)
+  name?: string;
+
+  @IsNumber()
+  @IsOptional()
+  sortOrder?: number;
 }

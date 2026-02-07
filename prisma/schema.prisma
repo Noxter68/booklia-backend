@@ -130,9 +130,11 @@ model Business {
   updatedAt DateTime @updatedAt
 
   // Relations
-  owner     User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  employees Employee[]
-  services  BusinessService[]
+  owner      User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  employees  Employee[]
+  services   BusinessService[]
+  hours      BusinessHours[]
+  categories BusinessCategory[]
 
   @@index([city])
 }
@@ -179,6 +181,38 @@ model EmployeeAvailability {
   @@unique([employeeId, dayOfWeek])
 }
 
+model BusinessHours {
+  id         String @id @default(cuid())
+  businessId String
+
+  dayOfWeek  Int     // 0 = Sunday, 1 = Monday, etc.
+  startTime  String  // "09:00"
+  endTime    String  // "18:00"
+  isClosed   Boolean @default(false)
+
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, dayOfWeek])
+}
+
+model BusinessCategory {
+  id         String @id @default(cuid())
+  businessId String
+  name       String
+  sortOrder  Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  services BusinessService[]
+
+  @@unique([businessId, name])
+  @@index([businessId])
+}
+
 model BusinessService {
   id          String @id @default(cuid())
   businessId  String
@@ -193,9 +227,13 @@ model BusinessService {
   // Duration in minutes
   durationMinutes Int
 
-  // Category
+  // Global Category (deprecated for business services)
   categoryId String?
   category   Category? @relation(fields: [categoryId], references: [id])
+
+  // Business-specific Category
+  businessCategoryId String?
+  businessCategory   BusinessCategory? @relation(fields: [businessCategoryId], references: [id])
 
   isActive   Boolean @default(true)
 
@@ -209,6 +247,7 @@ model BusinessService {
 
   @@index([businessId])
   @@index([categoryId])
+  @@index([businessCategoryId])
 }
 
 model EmployeeService {

@@ -17,6 +17,9 @@ import {
   CreateBusinessServiceDto,
   UpdateBusinessServiceDto,
   SearchBusinessDto,
+  UpdateBusinessHoursDto,
+  CreateBusinessCategoryDto,
+  UpdateBusinessCategoryDto,
 } from './dto/business.dto';
 import { AuthGuard } from '../auth/auth.guard';
 
@@ -81,5 +84,60 @@ export class BusinessController {
   @Get(':id/services')
   getServices(@Param('id') id: string) {
     return this.businessService.getServices(id);
+  }
+
+  // ============================================
+  // BUSINESS HOURS
+  // ============================================
+
+  @Get('hours/mine')
+  @UseGuards(AuthGuard)
+  async getMyHours(@Req() req: any) {
+    const business = await this.businessService.findByOwner(req.user.id);
+    return this.businessService.getHours(business.id);
+  }
+
+  @Put('hours')
+  @UseGuards(AuthGuard)
+  updateHours(@Req() req: any, @Body() dto: UpdateBusinessHoursDto) {
+    return this.businessService.updateHours(req.user.id, dto);
+  }
+
+  @Get(':slug/hours')
+  getHoursBySlug(@Param('slug') slug: string) {
+    return this.businessService.getHoursBySlug(slug);
+  }
+
+  // ============================================
+  // BUSINESS CATEGORIES
+  // ============================================
+
+  @Get('categories/mine')
+  @UseGuards(AuthGuard)
+  async getMyCategories(@Req() req: any) {
+    const business = await this.businessService.findByOwner(req.user.id);
+    return this.businessService.getCategories(business.id);
+  }
+
+  @Post('categories')
+  @UseGuards(AuthGuard)
+  createCategory(@Req() req: any, @Body() dto: CreateBusinessCategoryDto) {
+    return this.businessService.createCategory(req.user.id, dto);
+  }
+
+  @Put('categories/:id')
+  @UseGuards(AuthGuard)
+  updateCategory(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateBusinessCategoryDto,
+  ) {
+    return this.businessService.updateCategory(req.user.id, id, dto);
+  }
+
+  @Delete('categories/:id')
+  @UseGuards(AuthGuard)
+  deleteCategory(@Req() req: any, @Param('id') id: string) {
+    return this.businessService.deleteCategory(req.user.id, id);
   }
 }

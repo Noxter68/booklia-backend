@@ -20,6 +20,9 @@ import {
   UpdateBusinessHoursDto,
   CreateBusinessCategoryDto,
   UpdateBusinessCategoryDto,
+  UpdateVacationModeDto,
+  AddBusinessImageDto,
+  ReorderBusinessImagesDto,
 } from './dto/business.dto';
 import { AuthGuard } from '../auth/auth.guard';
 
@@ -139,5 +142,53 @@ export class BusinessController {
   @UseGuards(AuthGuard)
   deleteCategory(@Req() req: any, @Param('id') id: string) {
     return this.businessService.deleteCategory(req.user.id, id);
+  }
+
+  // ============================================
+  // VACATION MODE
+  // ============================================
+
+  @Put('vacation')
+  @UseGuards(AuthGuard)
+  updateVacationMode(@Req() req: any, @Body() dto: UpdateVacationModeDto) {
+    return this.businessService.updateVacationMode(
+      req.user.id,
+      dto.isOnVacation,
+      dto.vacationMessage,
+    );
+  }
+
+  // ============================================
+  // BUSINESS IMAGES
+  // ============================================
+
+  @Get('images/mine')
+  @UseGuards(AuthGuard)
+  async getMyImages(@Req() req: any) {
+    const business = await this.businessService.findByOwner(req.user.id);
+    return this.businessService.getImages(business.id);
+  }
+
+  @Post('images')
+  @UseGuards(AuthGuard)
+  addImage(@Req() req: any, @Body() dto: AddBusinessImageDto) {
+    return this.businessService.addImage(req.user.id, dto.url);
+  }
+
+  @Delete('images/:id')
+  @UseGuards(AuthGuard)
+  deleteImage(@Req() req: any, @Param('id') id: string) {
+    return this.businessService.deleteImage(req.user.id, id);
+  }
+
+  @Put('images/reorder')
+  @UseGuards(AuthGuard)
+  reorderImages(@Req() req: any, @Body() dto: ReorderBusinessImagesDto) {
+    return this.businessService.reorderImages(req.user.id, dto.imageIds);
+  }
+
+  @Get(':slug/images')
+  getImagesBySlug(@Param('slug') slug: string) {
+    return this.businessService.getImagesBySlug(slug);
   }
 }

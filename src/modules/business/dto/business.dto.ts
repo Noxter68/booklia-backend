@@ -28,6 +28,10 @@ export class CreateBusinessDto {
 
   @IsString()
   @IsOptional()
+  categoryId?: string;
+
+  @IsString()
+  @IsOptional()
   @ValidateIf((o) => o.logoUrl !== '' && o.logoUrl !== undefined)
   @IsUrl()
   logoUrl?: string;
@@ -82,6 +86,10 @@ export class UpdateBusinessDto {
   @IsOptional()
   @MaxLength(1000)
   description?: string;
+
+  @IsString()
+  @IsOptional()
+  categoryId?: string;
 
   @IsString()
   @IsOptional()
@@ -225,6 +233,10 @@ export class SearchBusinessDto {
   @IsNumber()
   @IsOptional()
   offset?: number;
+
+  @IsString()
+  @IsOptional()
+  sortBy?: 'recent' | 'popular' | 'rating'; // recent = createdAt desc, popular = tier + verified, rating = by rating
 }
 
 // ============================================
@@ -278,4 +290,34 @@ export class UpdateBusinessCategoryDto {
   @IsNumber()
   @IsOptional()
   sortOrder?: number;
+}
+
+// ============================================
+// VACATION MODE
+// ============================================
+
+export class UpdateVacationModeDto {
+  @IsBoolean()
+  isOnVacation: boolean;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  vacationMessage?: string;
+}
+
+// ============================================
+// BUSINESS IMAGES
+// ============================================
+
+export class AddBusinessImageDto {
+  @IsString()
+  @IsUrl()
+  url: string;
+}
+
+export class ReorderBusinessImagesDto {
+  @IsArray()
+  @IsString({ each: true })
+  imageIds: string[];
 }

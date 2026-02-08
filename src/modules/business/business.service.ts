@@ -104,6 +104,9 @@ export class BusinessService {
         categories: {
           orderBy: { sortOrder: 'asc' },
         },
+        images: {
+          orderBy: { sortOrder: 'asc' },
+        },
       },
     });
 
@@ -147,6 +150,9 @@ export class BusinessService {
           orderBy: { dayOfWeek: 'asc' },
         },
         categories: {
+          orderBy: { sortOrder: 'asc' },
+        },
+        images: {
           orderBy: { sortOrder: 'asc' },
         },
       },
@@ -210,17 +216,22 @@ export class BusinessService {
   }
 
   async search(dto: SearchBusinessDto) {
-    const { q, city, categoryId, limit = 20, offset = 0 } = dto;
+    const { q, city, categoryId, limit = 20, offset = 0, sortBy = 'popular' } = dto;
 
     const where: any = {
       isActive: true,
     };
 
+    // Build AND conditions
+    const andConditions: any[] = [];
+
     if (q) {
-      where.OR = [
-        { name: { contains: q, mode: 'insensitive' } },
-        { description: { contains: q, mode: 'insensitive' } },
-      ];
+      andConditions.push({
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { description: { contains: q, mode: 'insensitive' } },
+        ],
+      });
     }
 
     if (city) {
@@ -228,12 +239,44 @@ export class BusinessService {
     }
 
     if (categoryId) {
-      where.services = {
-        some: {
-          categoryId,
-          isActive: true,
-        },
-      };
+      // Search by business main category OR by having services in that category
+      andConditions.push({
+        OR: [
+          { categoryId },
+          {
+            services: {
+              some: {
+                categoryId,
+                isActive: true,
+              },
+            },
+          },
+        ],
+      });
+    }
+
+    if (andConditions.length > 0) {
+      where.AND = andConditions;
+    }
+
+    // Determine sort order based on sortBy parameter
+    let orderBy: any[];
+    switch (sortBy) {
+      case 'recent':
+        orderBy = [{ createdAt: 'desc' }];
+        break;
+      case 'rating':
+        // Sort by owner reputation rating (requires join logic, fallback to recent)
+        orderBy = [{ createdAt: 'desc' }];
+        break;
+      case 'popular':
+      default:
+        orderBy = [
+          { subscriptionTier: 'desc' }, // Premium businesses first
+          { isVerified: 'desc' },
+          { createdAt: 'desc' },
+        ];
+        break;
     }
 
     const [data, total] = await Promise.all([
@@ -256,11 +299,7 @@ export class BusinessService {
             },
           },
         },
-        orderBy: [
-          { subscriptionTier: 'desc' }, // Premium businesses first
-          { isVerified: 'desc' },
-          { createdAt: 'desc' },
-        ],
+        orderBy,
         take: limit,
         skip: offset,
       }),
@@ -514,5 +553,137 @@ export class BusinessService {
     });
 
     return { success: true };
+  }
+
+  // ============================================
+  // VACATION MODE
+  // ============================================
+
+  async updateVacationMode(
+    userId: string,
+    isOnVacation: boolean,
+    vacationMessage?: string,
+  ) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    return this.prisma.business.update({
+      where: { id: business.id },
+      data: {
+        isOnVacation,
+        vacationMessage: isOnVacation ? vacationMessage : null,
+      },
+    });
+  }
+
+  // ============================================
+  // BUSINESS IMAGES
+  // ============================================
+
+  async getImages(businessId: string) {
+    return this.prisma.businessImage.findMany({
+      where: { businessId },
+      orderBy: { sortOrder: 'asc' },
+    });
+  }
+
+  async getImagesBySlug(slug: string) {
+    const business = await this.prisma.business.findUnique({
+      where: { slug },
+      select: { id: true },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    return this.prisma.businessImage.findMany({
+      where: { businessId: business.id },
+      orderBy: { sortOrder: 'asc' },
+    });
+  }
+
+  async addImage(userId: string, url: string) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    // Check image count (max 10)
+    const imageCount = await this.prisma.businessImage.count({
+      where: { businessId: business.id },
+    });
+
+    if (imageCount >= 10) {
+      throw new ForbiddenException('Maximum 10 images autorisées');
+    }
+
+    // Get max sortOrder
+    const maxSort = await this.prisma.businessImage.aggregate({
+      where: { businessId: business.id },
+      _max: { sortOrder: true },
+    });
+
+    return this.prisma.businessImage.create({
+      data: {
+        businessId: business.id,
+        url,
+        sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
+      },
+    });
+  }
+
+  async deleteImage(userId: string, imageId: string) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    const image = await this.prisma.businessImage.findUnique({
+      where: { id: imageId },
+    });
+
+    if (!image || image.businessId !== business.id) {
+      throw new ForbiddenException('Accès refusé');
+    }
+
+    await this.prisma.businessImage.delete({
+      where: { id: imageId },
+    });
+
+    return { success: true };
+  }
+
+  async reorderImages(userId: string, imageIds: string[]) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    // Update sort order for each image
+    await this.prisma.$transaction(
+      imageIds.map((id, index) =>
+        this.prisma.businessImage.updateMany({
+          where: { id, businessId: business.id },
+          data: { sortOrder: index },
+        }),
+      ),
+    );
+
+    return this.getImages(business.id);
   }
 }

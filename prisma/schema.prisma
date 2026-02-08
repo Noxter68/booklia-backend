@@ -102,6 +102,10 @@ model Business {
   logoUrl     String?
   coverUrl    String?
 
+  // Main Category (for search/filtering)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
   // Contact
   phone   String?
   email   String?
@@ -126,6 +130,10 @@ model Business {
   isActive      Boolean @default(true)
   acceptsOnlineBooking Boolean @default(true)
 
+  // Vacation mode
+  isOnVacation    Boolean @default(false)
+  vacationMessage String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -135,8 +143,24 @@ model Business {
   services   BusinessService[]
   hours      BusinessHours[]
   categories BusinessCategory[]
+  images     BusinessImage[]
 
   @@index([city])
+  @@index([categoryId])
+}
+
+model BusinessImage {
+  id         String @id @default(cuid())
+  businessId String
+  url        String
+  sortOrder  Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
 }
 
 model Employee {
@@ -361,6 +385,7 @@ model Category {
   children         Category[]        @relation("CategoryHierarchy")
   services         Service[]
   businessServices BusinessService[]
+  businesses       Business[]
 }
 
 model Tag {

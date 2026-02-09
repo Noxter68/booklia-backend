@@ -10,7 +10,7 @@ import {
   Min,
   MaxLength,
 } from 'class-validator';
-import { ServiceKind, Urgency, Recurrence } from '@prisma/client';
+import { ServiceKind, Urgency, Recurrence, ServiceStatus } from '@prisma/client';
 
 export class CreateServiceDto {
   @IsEnum(ServiceKind)
@@ -46,6 +46,14 @@ export class CreateServiceDto {
   @IsInt()
   @Min(0)
   priceMaxCents?: number;
+
+  @IsOptional()
+  @IsString()
+  pricingType?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isVariablePrice?: boolean;
 
   @IsOptional()
   @IsString()
@@ -108,4 +116,8 @@ export class CreateServiceDto {
   @IsOptional()
   @IsDateString()
   availableToDate?: string;
+
+  @IsOptional()
+  @IsEnum(ServiceStatus)
+  status?: ServiceStatus;
 }

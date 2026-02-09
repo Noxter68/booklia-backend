@@ -32,6 +32,11 @@ export class ServicesController {
     return this.servicesService.search(dto);
   }
 
+  @Get('user/:userId')
+  async findByUserId(@Param('userId') userId: string) {
+    return this.servicesService.findPublishedByUser(userId);
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.servicesService.findOneOrFail(id);

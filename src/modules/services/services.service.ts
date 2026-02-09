@@ -23,11 +23,12 @@ export class ServicesService {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    const { tagIds, availableFromDate, availableToDate, deadlineAt, ...serviceData } = dto;
+    const { tagIds, availableFromDate, availableToDate, deadlineAt, status, ...serviceData } = dto;
 
     return this.prisma.service.create({
       data: {
         ...serviceData,
+        status: status || ServiceStatus.DRAFT,
         deadlineAt: deadlineAt ? new Date(deadlineAt) : undefined,
         availableFromDate: availableFromDate ? new Date(availableFromDate) : undefined,
         availableToDate: availableToDate ? new Date(availableToDate) : undefined,
@@ -310,6 +311,28 @@ export class ServicesService {
         category: true,
         tags: { include: { tag: true } },
         _count: { select: { bookings: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async findPublishedByUser(userId: string) {
+    return this.prisma.service.findMany({
+      where: {
+        createdByUserId: userId,
+        status: ServiceStatus.PUBLISHED,
+        expiresAt: { gt: new Date() },
+      },
+      include: {
+        category: true,
+        tags: { include: { tag: true } },
+        createdBy: {
+          select: {
+            id: true,
+            profile: { select: { displayName: true, avatarUrl: true, city: true } },
+            reputation: true,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });

@@ -299,7 +299,21 @@ model Profile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  images ProfileImage[]
+}
+
+model ProfileImage {
+  id        String @id @default(cuid())
+  profileId String
+  url       String
+  sortOrder Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  profile Profile @relation(fields: [profileId], references: [userId], onDelete: Cascade)
+
+  @@index([profileId])
 }
 
 // ============================================
@@ -313,9 +327,11 @@ model Service {
   description String
 
   // Pricing
-  priceMinCents Int?
-  priceMaxCents Int?
-  currency      String @default("EUR")
+  priceMinCents   Int?
+  priceMaxCents   Int?
+  pricingType     String  @default("HOURLY") // "HOURLY" or "FIXED"
+  isVariablePrice Boolean @default(false)
+  currency        String  @default("EUR")
 
   // Duration (in minutes)
   durationMinutes Int?

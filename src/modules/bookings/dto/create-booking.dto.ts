@@ -27,4 +27,19 @@ export class CreateBookingDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  // P2P booking contact info
+  @ValidateIf((o) => !!o.serviceId)
+  @IsString()
+  requesterPhone?: string;
+
+  @IsOptional()
+  @IsString()
+  requesterAddress?: string;
+}
+
+export class RejectBookingDto {
+  @IsOptional()
+  @IsString()
+  message?: string;
 }

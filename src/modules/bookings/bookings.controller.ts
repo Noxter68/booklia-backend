@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Delete,
   Body,
   Param,
   Query,
@@ -10,7 +11,7 @@ import {
 import { BookingsService } from './bookings.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { CreateBookingDto } from './dto/create-booking.dto';
+import { CreateBookingDto, RejectBookingDto } from './dto/create-booking.dto';
 import { User } from '@prisma/client';
 
 @Controller('bookings')
@@ -43,6 +44,15 @@ export class BookingsController {
     return this.bookingsService.cancel(user.id, id);
   }
 
+  @Post(':id/reject')
+  async reject(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Body() dto: RejectBookingDto,
+  ) {
+    return this.bookingsService.reject(user.id, id, dto.message);
+  }
+
   @Get('me')
   async findMyBookings(
     @CurrentUser() user: User,
@@ -56,5 +66,10 @@ export class BookingsController {
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.bookingsService.findOneOrFail(id);
+  }
+
+  @Delete(':id')
+  async delete(@CurrentUser() user: User, @Param('id') id: string) {
+    return this.bookingsService.deleteByRequester(user.id, id);
   }
 }

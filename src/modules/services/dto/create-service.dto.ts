@@ -40,20 +40,11 @@ export class CreateServiceDto {
   @IsOptional()
   @IsInt()
   @Min(0)
-  priceMinCents?: number;
-
-  @IsOptional()
-  @IsInt()
-  @Min(0)
-  priceMaxCents?: number;
+  priceCents?: number;
 
   @IsOptional()
   @IsString()
   pricingType?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  isVariablePrice?: boolean;
 
   @IsOptional()
   @IsString()

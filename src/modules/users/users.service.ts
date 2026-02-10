@@ -86,7 +86,7 @@ export class UsersService {
     // First ensure profile exists
     await this.ensureProfileExists(userId);
 
-    return this.prisma.profileImage.findMany({
+    return this.prisma.peopleImage.findMany({
       where: { profileId: userId },
       orderBy: { sortOrder: 'asc' },
     });
@@ -96,7 +96,7 @@ export class UsersService {
     await this.ensureProfileExists(userId);
 
     // Check count limit
-    const count = await this.prisma.profileImage.count({
+    const count = await this.prisma.peopleImage.count({
       where: { profileId: userId },
     });
 
@@ -107,12 +107,12 @@ export class UsersService {
     }
 
     // Get next sortOrder
-    const lastImage = await this.prisma.profileImage.findFirst({
+    const lastImage = await this.prisma.peopleImage.findFirst({
       where: { profileId: userId },
       orderBy: { sortOrder: 'desc' },
     });
 
-    return this.prisma.profileImage.create({
+    return this.prisma.peopleImage.create({
       data: {
         profileId: userId,
         url,
@@ -122,7 +122,7 @@ export class UsersService {
   }
 
   async deleteProfileImage(userId: string, imageId: string) {
-    const image = await this.prisma.profileImage.findUnique({
+    const image = await this.prisma.peopleImage.findUnique({
       where: { id: imageId },
     });
 
@@ -134,7 +134,7 @@ export class UsersService {
       throw new ForbiddenException('You can only delete your own images');
     }
 
-    await this.prisma.profileImage.delete({
+    await this.prisma.peopleImage.delete({
       where: { id: imageId },
     });
 
@@ -143,7 +143,7 @@ export class UsersService {
 
   async reorderProfileImages(userId: string, imageIds: string[]) {
     // Verify all images belong to this user
-    const images = await this.prisma.profileImage.findMany({
+    const images = await this.prisma.peopleImage.findMany({
       where: { profileId: userId },
     });
 
@@ -157,7 +157,7 @@ export class UsersService {
     // Update sortOrder for each image
     await Promise.all(
       imageIds.map((id, index) =>
-        this.prisma.profileImage.update({
+        this.prisma.peopleImage.update({
           where: { id },
           data: { sortOrder: index },
         }),

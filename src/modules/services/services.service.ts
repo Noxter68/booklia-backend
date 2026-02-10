@@ -15,9 +15,9 @@ export class ServicesService {
   constructor(private prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateServiceDto) {
-    // REQUEST requires priceMinCents
-    if (dto.kind === ServiceKind.REQUEST && !dto.priceMinCents) {
-      throw new BadRequestException('REQUEST services require a minimum price');
+    // REQUEST requires priceCents
+    if (dto.kind === ServiceKind.REQUEST && !dto.priceCents) {
+      throw new BadRequestException('REQUEST services require a price');
     }
 
     const expiresAt = new Date();
@@ -46,7 +46,17 @@ export class ServicesService {
         createdBy: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            profile: {
+              select: {
+                displayName: true,
+                avatarUrl: true,
+                city: true,
+                images: {
+                  orderBy: { sortOrder: 'asc' },
+                  take: 1,
+                },
+              },
+            },
             reputation: true,
           },
         },
@@ -119,7 +129,17 @@ export class ServicesService {
         createdBy: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true, city: true } },
+            profile: {
+              select: {
+                displayName: true,
+                avatarUrl: true,
+                city: true,
+                images: {
+                  orderBy: { sortOrder: 'asc' },
+                  take: 1,
+                },
+              },
+            },
             reputation: true,
           },
         },
@@ -147,9 +167,9 @@ export class ServicesService {
     if (dto.isRecurring !== undefined) where.isRecurring = dto.isRecurring;
 
     if (dto.priceMin || dto.priceMax) {
-      where.priceMinCents = {};
-      if (dto.priceMin) where.priceMinCents.gte = dto.priceMin;
-      if (dto.priceMax) where.priceMinCents.lte = dto.priceMax;
+      where.priceCents = {};
+      if (dto.priceMin) where.priceCents.gte = dto.priceMin;
+      if (dto.priceMax) where.priceCents.lte = dto.priceMax;
     }
 
     // City search (text-based)
@@ -216,7 +236,17 @@ export class ServicesService {
           createdBy: {
             select: {
               id: true,
-              profile: { select: { displayName: true, avatarUrl: true, city: true } },
+              profile: {
+                select: {
+                  displayName: true,
+                  avatarUrl: true,
+                  city: true,
+                  images: {
+                    orderBy: { sortOrder: 'asc' },
+                    take: 1,
+                  },
+                },
+              },
               reputation: true,
             },
           },
@@ -329,7 +359,17 @@ export class ServicesService {
         createdBy: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true, city: true } },
+            profile: {
+              select: {
+                displayName: true,
+                avatarUrl: true,
+                city: true,
+                images: {
+                  orderBy: { sortOrder: 'asc' },
+                  take: 1,
+                },
+              },
+            },
             reputation: true,
           },
         },

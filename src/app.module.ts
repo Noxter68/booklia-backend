@@ -11,6 +11,10 @@ import { TagsModule } from './modules/tags/tags.module';
 import { StripeModule } from './modules/stripe/stripe.module';
 import { BusinessModule } from './modules/business/business.module';
 import { EmployeesModule } from './modules/employees/employees.module';
+import { UploadModule } from './modules/upload/upload.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { BookingCommentsModule } from './modules/booking-comments/booking-comments.module';
+import { WebsocketModule } from './modules/websocket/websocket.module';
 
 @Module({
   imports: [
@@ -18,6 +22,7 @@ import { EmployeesModule } from './modules/employees/employees.module';
       isGlobal: true,
     }),
     PrismaModule,
+    WebsocketModule,
     AuthModule,
     UsersModule,
     ServicesModule,
@@ -28,6 +33,9 @@ import { EmployeesModule } from './modules/employees/employees.module';
     StripeModule,
     BusinessModule,
     EmployeesModule,
+    UploadModule,
+    NotificationsModule,
+    BookingCommentsModule,
   ],
 })
 export class AppModule {}

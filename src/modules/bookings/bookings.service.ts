@@ -3,14 +3,23 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingStatus, ServiceKind } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
+import { WebsocketGateway } from '../websocket/websocket.gateway';
 
 @Injectable()
 export class BookingsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => NotificationsService))
+    private notificationsService: NotificationsService,
+    private websocketGateway: WebsocketGateway,
+  ) {}
 
   async create(userId: string, dto: CreateBookingDto) {
     // Business booking
@@ -50,13 +59,16 @@ export class BookingsService {
       providerId = userId;
     }
 
-    return this.prisma.booking.create({
+    const booking = await this.prisma.booking.create({
       data: {
         serviceId: dto.serviceId,
         requesterId,
         providerId,
         agreedPriceCents: dto.agreedPriceCents,
         scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
+        notes: dto.notes,
+        requesterPhone: dto.requesterPhone,
+        requesterAddress: dto.requesterAddress,
       },
       include: {
         service: true,
@@ -74,6 +86,17 @@ export class BookingsService {
         },
       },
     });
+
+    // Send notification to provider
+    const requesterName = booking.requester.profile?.displayName || 'Quelqu\'un';
+    await this.notificationsService.notifyNewBooking(
+      providerId,
+      requesterName,
+      service.title,
+      booking.id,
+    );
+
+    return booking;
   }
 
   private async createBusinessBooking(userId: string, dto: CreateBookingDto) {
@@ -113,7 +136,7 @@ export class BookingsService {
     }
 
     // The requester is the user booking, the provider is the business owner
-    return this.prisma.booking.create({
+    const booking = await this.prisma.booking.create({
       data: {
         requesterId: userId,
         providerId: businessService.business.ownerId,
@@ -144,6 +167,17 @@ export class BookingsService {
         },
       },
     });
+
+    // Send notification to business owner (provider)
+    const requesterName = booking.requester.profile?.displayName || 'Quelqu\'un';
+    await this.notificationsService.notifyNewBooking(
+      businessService.business.ownerId,
+      requesterName,
+      businessService.name,
+      booking.id,
+    );
+
+    return booking;
   }
 
   async accept(userId: string, bookingId: string) {
@@ -154,10 +188,28 @@ export class BookingsService {
       throw new BadRequestException('Booking must be PENDING to accept');
     }
 
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: { status: BookingStatus.ACCEPTED },
     });
+
+    // Send notification to requester
+    const providerName = booking.provider.profile?.displayName || 'Le prestataire';
+    const serviceTitle = booking.service?.title || booking.businessService?.name || 'un service';
+    await this.notificationsService.notifyBookingAccepted(
+      booking.requesterId,
+      providerName,
+      serviceTitle,
+      bookingId,
+    );
+
+    // Send real-time status update to requester
+    this.websocketGateway.sendBookingStatusUpdate(booking.requesterId, {
+      ...booking,
+      status: BookingStatus.ACCEPTED,
+    });
+
+    return updated;
   }
 
   async start(userId: string, bookingId: string) {
@@ -215,10 +267,115 @@ export class BookingsService {
       throw new BadRequestException('Cannot cancel a completed or already canceled booking');
     }
 
-    return this.prisma.booking.update({
+    // Check if this is a late cancellation (< 24h before scheduled time)
+    // Only applies if booking was ACCEPTED and has a scheduled time
+    let isLateCancellation = false;
+    if (
+      booking.status === BookingStatus.ACCEPTED &&
+      booking.scheduledAt
+    ) {
+      const now = new Date();
+      const scheduledTime = new Date(booking.scheduledAt);
+      const hoursUntilScheduled = (scheduledTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      if (hoursUntilScheduled < 24 && hoursUntilScheduled > 0) {
+        isLateCancellation = true;
+
+        // Apply penalty to the user canceling
+        await this.prisma.userReputation.upsert({
+          where: { userId },
+          update: { lateCancellationCount: { increment: 1 } },
+          create: { userId, lateCancellationCount: 1 },
+        });
+      }
+    }
+
+    const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: { status: BookingStatus.CANCELED },
     });
+
+    // Determine who is canceling and notify the other party
+    const isRequester = booking.requesterId === userId;
+    const cancellerName = isRequester
+      ? booking.requester.profile?.displayName || 'Le demandeur'
+      : booking.provider.profile?.displayName || 'Le prestataire';
+    const serviceTitle = booking.service?.title || booking.businessService?.name || 'un service';
+    const otherUserId = isRequester ? booking.providerId : booking.requesterId;
+
+    await this.notificationsService.notifyBookingCanceled(
+      otherUserId,
+      cancellerName,
+      serviceTitle,
+      bookingId,
+    );
+
+    // Send real-time status update to the other party
+    this.websocketGateway.sendBookingStatusUpdate(otherUserId, {
+      ...booking,
+      status: BookingStatus.CANCELED,
+    });
+
+    return { ...updated, isLateCancellation };
+  }
+
+  // Allow either party to delete a canceled booking from their view
+  async deleteByRequester(userId: string, bookingId: string) {
+    const booking = await this.findOneOrFail(bookingId);
+
+    // Either party can delete the booking
+    if (booking.requesterId !== userId && booking.providerId !== userId) {
+      throw new ForbiddenException('You are not part of this booking');
+    }
+
+    // Can only delete if status is CANCELED
+    if (booking.status !== BookingStatus.CANCELED) {
+      throw new BadRequestException('Only canceled bookings can be deleted');
+    }
+
+    return this.prisma.booking.delete({
+      where: { id: bookingId },
+    });
+  }
+
+  async reject(userId: string, bookingId: string, message?: string) {
+    const booking = await this.findOneOrFail(bookingId);
+
+    // Only the provider can reject
+    if (booking.providerId !== userId) {
+      throw new ForbiddenException('Only the provider can reject a booking');
+    }
+
+    if (booking.status !== BookingStatus.PENDING) {
+      throw new BadRequestException('Booking must be PENDING to reject');
+    }
+
+    const updated = await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        status: BookingStatus.CANCELED,
+        rejectionMessage: message,
+      },
+    });
+
+    // Send notification to requester
+    const providerName = booking.provider.profile?.displayName || 'Le prestataire';
+    const serviceTitle = booking.service?.title || booking.businessService?.name || 'un service';
+    await this.notificationsService.notifyBookingRejected(
+      booking.requesterId,
+      providerName,
+      serviceTitle,
+      bookingId,
+    );
+
+    // Send real-time status update to requester
+    this.websocketGateway.sendBookingStatusUpdate(booking.requesterId, {
+      ...booking,
+      status: BookingStatus.CANCELED,
+      rejectionMessage: message,
+    });
+
+    return updated;
   }
 
   async findByUser(userId: string, role?: 'requester' | 'provider', from?: string, to?: string) {
@@ -243,7 +400,7 @@ export class BookingsService {
       }
     }
 
-    return this.prisma.booking.findMany({
+    const bookings = await this.prisma.booking.findMany({
       where,
       include: {
         // P2P booking relations
@@ -278,6 +435,26 @@ export class BookingsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    // Hide requesterPhone if booking is not accepted (for provider view)
+    return bookings.map((booking) => {
+      // Only show phone if user is the provider AND status is ACCEPTED or later
+      const isProvider = booking.providerId === userId;
+      const isAcceptedOrLater = ['ACCEPTED', 'IN_PROGRESS', 'COMPLETED'].includes(booking.status);
+
+      if (isProvider && !isAcceptedOrLater) {
+        // Hide contact info for pending bookings
+        return {
+          ...booking,
+          requesterPhone: null,
+          requesterAddress: null,
+        };
+      }
+
+      // For requester view, always show their own contact info
+      // For provider view with accepted status, show contact info
+      return booking;
+    });
   }
 
   async findOne(bookingId: string) {
@@ -285,6 +462,12 @@ export class BookingsService {
       where: { id: bookingId },
       include: {
         service: true,
+        businessService: {
+          include: {
+            business: true,
+          },
+        },
+        employee: true,
         requester: {
           select: {
             id: true,

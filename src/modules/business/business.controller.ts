@@ -53,6 +53,11 @@ export class BusinessController {
     return this.businessService.search(dto);
   }
 
+  @Get('owner/:userId')
+  findByOwnerId(@Param('userId') userId: string) {
+    return this.businessService.findByOwnerPublic(userId);
+  }
+
   @Get(':slug')
   findBySlug(@Param('slug') slug: string) {
     return this.businessService.findBySlug(slug);

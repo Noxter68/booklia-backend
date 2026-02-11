@@ -117,6 +117,47 @@ export class BusinessService {
     return business;
   }
 
+  /** Find business by owner ID (public endpoint) */
+  async findByOwnerPublic(userId: string) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId, isActive: true },
+      include: {
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            reputation: true,
+          },
+        },
+        employees: {
+          where: { isActive: true },
+          include: {
+            availabilities: true,
+          },
+        },
+        services: {
+          where: { isActive: true },
+          include: {
+            category: true,
+            businessCategory: true,
+          },
+        },
+        hours: {
+          orderBy: { dayOfWeek: 'asc' },
+        },
+        categories: {
+          orderBy: { sortOrder: 'asc' },
+        },
+        images: {
+          orderBy: { sortOrder: 'asc' },
+        },
+      },
+    });
+
+    // Return null if no business found (not an error for public endpoint)
+    return business;
+  }
+
   async findBySlug(slug: string) {
     const business = await this.prisma.business.findUnique({
       where: { slug, isActive: true },

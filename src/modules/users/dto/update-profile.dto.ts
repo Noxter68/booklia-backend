@@ -12,6 +12,10 @@ export class UpdateProfileDto {
 
   @IsOptional()
   @IsString()
+  coverUrl?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(500)
   bio?: string;
 

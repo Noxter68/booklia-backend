@@ -36,6 +36,7 @@ const SERVICE_INCLUDE = {
         select: {
           displayName: true,
           avatarUrl: true,
+          coverUrl: true,
           city: true,
           images: { orderBy: { sortOrder: 'asc' as const }, take: 1 },
         },
@@ -271,7 +272,7 @@ export class ServicesService {
           createdBy: {
             select: {
               id: true,
-              profile: { select: { displayName: true, avatarUrl: true, city: true } },
+              profile: { select: { displayName: true, avatarUrl: true, coverUrl: true, city: true } },
               reputation: true,
             },
           },

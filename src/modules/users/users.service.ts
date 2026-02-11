@@ -1,12 +1,16 @@
 import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { UploadService } from '../upload/upload.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
 const MAX_PROFILE_IMAGES = 10;
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private uploadService: UploadService,
+  ) {}
 
   async getProfile(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -31,6 +35,27 @@ export class UsersService {
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
+    // Get current profile to check for old images to delete
+    const currentProfile = await this.prisma.profile.findUnique({
+      where: { userId },
+    });
+
+    // Delete old avatar from R2 if it's being replaced
+    if (dto.avatarUrl && currentProfile?.avatarUrl && dto.avatarUrl !== currentProfile.avatarUrl) {
+      const oldKey = this.uploadService.extractKeyFromUrl(currentProfile.avatarUrl);
+      if (oldKey) {
+        await this.uploadService.deleteFile(oldKey);
+      }
+    }
+
+    // Delete old cover from R2 if it's being replaced
+    if (dto.coverUrl && currentProfile?.coverUrl && dto.coverUrl !== currentProfile.coverUrl) {
+      const oldKey = this.uploadService.extractKeyFromUrl(currentProfile.coverUrl);
+      if (oldKey) {
+        await this.uploadService.deleteFile(oldKey);
+      }
+    }
+
     return this.prisma.profile.upsert({
       where: { userId },
       update: dto,
@@ -132,6 +157,12 @@ export class UsersService {
 
     if (image.profileId !== userId) {
       throw new ForbiddenException('You can only delete your own images');
+    }
+
+    // Delete from R2
+    const key = this.uploadService.extractKeyFromUrl(image.url);
+    if (key) {
+      await this.uploadService.deleteFile(key);
     }
 
     await this.prisma.peopleImage.delete({

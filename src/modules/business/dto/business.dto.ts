@@ -155,6 +155,11 @@ export class CreateBusinessServiceDto {
   @MaxLength(500)
   description?: string;
 
+  @IsString()
+  @IsOptional()
+  @MaxLength(10000)
+  detailedDescription?: string; // Rich text HTML content
+
   @IsNumber()
   priceCents: number;
 
@@ -185,6 +190,11 @@ export class UpdateBusinessServiceDto {
   @IsOptional()
   @MaxLength(500)
   description?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(10000)
+  detailedDescription?: string; // Rich text HTML content
 
   @IsNumber()
   @IsOptional()

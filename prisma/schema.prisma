@@ -245,6 +245,7 @@ model BusinessService {
 
   name        String
   description String?
+  detailedDescription String? // Rich text HTML content for detailed service info
 
   // Pricing
   priceCents  Int
@@ -295,6 +296,7 @@ model Profile {
   userId      String  @id
   displayName String?
   avatarUrl   String?
+  coverUrl    String?
   bio         String?
   city        String?
 

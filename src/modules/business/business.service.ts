@@ -5,6 +5,7 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { UploadService } from '../upload/upload.service';
 import {
   CreateBusinessDto,
   UpdateBusinessDto,
@@ -18,7 +19,10 @@ import {
 
 @Injectable()
 export class BusinessService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private uploadService: UploadService,
+  ) {}
 
   private generateSlug(name: string): string {
     return name
@@ -244,6 +248,22 @@ export class BusinessService {
 
     if (!business) {
       throw new NotFoundException('Business non trouvé');
+    }
+
+    // Delete old logo from R2 if it's being replaced
+    if (dto.logoUrl && business.logoUrl && dto.logoUrl !== business.logoUrl) {
+      const oldKey = this.uploadService.extractKeyFromUrl(business.logoUrl);
+      if (oldKey) {
+        await this.uploadService.deleteFile(oldKey);
+      }
+    }
+
+    // Delete old cover from R2 if it's being replaced
+    if (dto.coverUrl && business.coverUrl && dto.coverUrl !== business.coverUrl) {
+      const oldKey = this.uploadService.extractKeyFromUrl(business.coverUrl);
+      if (oldKey) {
+        await this.uploadService.deleteFile(oldKey);
+      }
     }
 
     return this.prisma.business.update({
@@ -697,6 +717,12 @@ export class BusinessService {
 
     if (!image || image.businessId !== business.id) {
       throw new ForbiddenException('Accès refusé');
+    }
+
+    // Delete from R2
+    const key = this.uploadService.extractKeyFromUrl(image.url);
+    if (key) {
+      await this.uploadService.deleteFile(key);
     }
 
     await this.prisma.businessImage.delete({

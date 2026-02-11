@@ -555,13 +555,18 @@ model Review {
 
 model UserReputation {
   userId     String @id
-  ratingAvg5 Float  @default(0)
-  ratingCount Int    @default(0)
-  xp          Int    @default(0)
-  level       Int    @default(1)
-  trustScore  Float  @default(0)
 
-  // Late cancellation tracking (canceled < 24h before scheduled time)
+  // ELO-style trust score (starts at 1000, goes up/down)
+  elo         Int    @default(1000)
+
+  // Rating stats
+  ratingAvg5  Float  @default(0)
+  ratingCount Int    @default(0)
+
+  // Activity stats
+  completedBookings Int @default(0)
+
+  // Penalty tracking
   lateCancellationCount Int @default(0)
 
   updatedAt DateTime @updatedAt
@@ -607,10 +612,9 @@ enum Recurrence {
 enum BookingStatus {
   PENDING
   ACCEPTED
-  IN_PROGRESS
+  REJECTED
   COMPLETED
   CANCELED
-  DISPUTED
 }
 
 enum ReviewType {

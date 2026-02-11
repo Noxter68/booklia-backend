@@ -7,10 +7,14 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { BookingStatus, ReviewType } from '@prisma/client';
+import { ReputationService } from '../reputation/reputation.service';
 
 @Injectable()
 export class ReviewsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private reputationService: ReputationService,
+  ) {}
 
   async create(userId: string, dto: CreateReviewDto) {
     const booking = await this.prisma.booking.findUnique({
@@ -55,6 +59,7 @@ export class ReviewsService {
         ? booking.providerId
         : booking.requesterId;
 
+    // Create the review
     const review = await this.prisma.review.create({
       data: {
         bookingId: dto.bookingId,
@@ -66,64 +71,23 @@ export class ReviewsService {
       },
     });
 
-    // Update reputation
-    await this.updateReputation(targetUserId, dto.score);
+    // Get current reputation for the target user
+    const targetReputation = await this.prisma.userReputation.findUnique({
+      where: { userId: targetUserId },
+    });
 
-    // Award XP for leaving a review
-    await this.awardXpForReview(userId);
+    // Update target's reputation (ELO + rating average)
+    await this.reputationService.onReviewReceived(
+      targetUserId,
+      dto.score,
+      targetReputation?.ratingAvg5 ?? 0,
+      targetReputation?.ratingCount ?? 0,
+    );
+
+    // Award ELO to the reviewer for leaving a review
+    await this.reputationService.onReviewGiven(userId);
 
     return review;
-  }
-
-  private async updateReputation(userId: string, newScore: number) {
-    const reputation = await this.prisma.userReputation.findUnique({
-      where: { userId },
-    });
-
-    if (reputation) {
-      const newCount = reputation.ratingCount + 1;
-      const newAvg =
-        (reputation.ratingAvg5 * reputation.ratingCount + newScore) / newCount;
-
-      // Calculate trust score (simplified: based on rating and count)
-      // Score is now 1-5, so multiply by 16 instead of 8 to keep same scale
-      const trustScore = Math.min(100, newAvg * 16 + Math.log(newCount + 1) * 5);
-
-      await this.prisma.userReputation.update({
-        where: { userId },
-        data: {
-          ratingAvg5: newAvg,
-          ratingCount: newCount,
-          trustScore,
-        },
-      });
-    } else {
-      await this.prisma.userReputation.create({
-        data: {
-          userId,
-          ratingAvg5: newScore,
-          ratingCount: 1,
-          trustScore: newScore * 16,
-        },
-      });
-    }
-  }
-
-  private async awardXpForReview(userId: string) {
-    const reputation = await this.prisma.userReputation.upsert({
-      where: { userId },
-      update: { xp: { increment: 5 } },
-      create: { userId, xp: 5 },
-    });
-
-    // Check for level up (XP required = 100 * currentLevel)
-    const xpForNextLevel = 100 * reputation.level;
-    if (reputation.xp >= xpForNextLevel) {
-      await this.prisma.userReputation.update({
-        where: { userId },
-        data: { level: { increment: 1 } },
-      });
-    }
   }
 
   async findByUser(userId: string) {

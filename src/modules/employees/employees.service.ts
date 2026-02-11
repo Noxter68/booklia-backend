@@ -230,7 +230,7 @@ export class EmployeesService {
           lte: endOfDay,
         },
         status: {
-          in: ['PENDING', 'ACCEPTED', 'IN_PROGRESS'],
+          in: ['PENDING', 'ACCEPTED'],
         },
       },
       include: {

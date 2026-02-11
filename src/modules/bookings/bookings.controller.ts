@@ -29,11 +29,6 @@ export class BookingsController {
     return this.bookingsService.accept(user.id, id);
   }
 
-  @Post(':id/start')
-  async start(@CurrentUser() user: User, @Param('id') id: string) {
-    return this.bookingsService.start(user.id, id);
-  }
-
   @Post(':id/complete')
   async complete(@CurrentUser() user: User, @Param('id') id: string) {
     return this.bookingsService.complete(user.id, id);

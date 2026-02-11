@@ -15,6 +15,7 @@ import { UploadModule } from './modules/upload/upload.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { BookingCommentsModule } from './modules/booking-comments/booking-comments.module';
 import { WebsocketModule } from './modules/websocket/websocket.module';
+import { ReputationModule } from './modules/reputation/reputation.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { WebsocketModule } from './modules/websocket/websocket.module';
       isGlobal: true,
     }),
     PrismaModule,
+    ReputationModule,
     WebsocketModule,
     AuthModule,
     UsersModule,

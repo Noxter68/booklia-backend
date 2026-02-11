@@ -11,6 +11,7 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingStatus, ServiceKind } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
+import { ReputationService } from '../reputation/reputation.service';
 
 @Injectable()
 export class BookingsService {
@@ -19,6 +20,7 @@ export class BookingsService {
     @Inject(forwardRef(() => NotificationsService))
     private notificationsService: NotificationsService,
     private websocketGateway: WebsocketGateway,
+    private reputationService: ReputationService,
   ) {}
 
   async create(userId: string, dto: CreateBookingDto) {
@@ -212,40 +214,16 @@ export class BookingsService {
     return updated;
   }
 
-  async start(userId: string, bookingId: string) {
-    const booking = await this.findOneOrFail(bookingId);
-    this.assertUserInBooking(userId, booking);
-
-    if (booking.status !== BookingStatus.ACCEPTED) {
-      throw new BadRequestException('Booking must be ACCEPTED to start');
-    }
-
-    return this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: BookingStatus.IN_PROGRESS },
-    });
-  }
-
   async complete(userId: string, bookingId: string) {
     const booking = await this.findOneOrFail(bookingId);
     this.assertUserInBooking(userId, booking);
 
-    if (booking.status !== BookingStatus.IN_PROGRESS) {
-      throw new BadRequestException('Booking must be IN_PROGRESS to complete');
+    if (booking.status !== BookingStatus.ACCEPTED) {
+      throw new BadRequestException('Booking must be ACCEPTED to complete');
     }
 
-    // Award XP for completing a booking
-    await this.prisma.userReputation.upsert({
-      where: { userId: booking.requesterId },
-      update: { xp: { increment: 5 } },
-      create: { userId: booking.requesterId, xp: 5 },
-    });
-
-    await this.prisma.userReputation.upsert({
-      where: { userId: booking.providerId },
-      update: { xp: { increment: 5 } },
-      create: { userId: booking.providerId, xp: 5 },
-    });
+    // Award ELO only for the requester (particulier) - businesses only get reviews
+    await this.reputationService.onBookingCompleted(booking.requesterId);
 
     return this.prisma.booking.update({
       where: { id: bookingId },
@@ -254,6 +232,82 @@ export class BookingsService {
         completedAt: new Date(),
       },
     });
+  }
+
+  /**
+   * Auto-complete bookings that have passed their scheduled time
+   * Called by a cron job or scheduler
+   */
+  async autoCompleteExpiredBookings() {
+    const now = new Date();
+
+    // Find all ACCEPTED bookings where scheduledAt has passed
+    const expiredBookings = await this.prisma.booking.findMany({
+      where: {
+        status: BookingStatus.ACCEPTED,
+        scheduledAt: {
+          lt: now,
+        },
+      },
+    });
+
+    const results = [];
+    for (const booking of expiredBookings) {
+      try {
+        // Award ELO only for the requester (particulier)
+        await this.reputationService.onBookingCompleted(booking.requesterId);
+
+        await this.prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            status: BookingStatus.COMPLETED,
+            completedAt: now,
+          },
+        });
+        results.push({ id: booking.id, success: true });
+      } catch (error) {
+        results.push({ id: booking.id, success: false, error: error.message });
+      }
+    }
+
+    return { processed: results.length, results };
+  }
+
+  /**
+   * Lazy auto-complete: check and complete expired bookings for a specific user
+   * Called when fetching bookings to ensure the list is always up-to-date
+   */
+  private async autoCompleteExpiredForUser(userId: string) {
+    const now = new Date();
+
+    // Find all ACCEPTED bookings for this user where scheduledAt has passed
+    const expiredBookings = await this.prisma.booking.findMany({
+      where: {
+        status: BookingStatus.ACCEPTED,
+        scheduledAt: {
+          lt: now,
+        },
+        OR: [{ requesterId: userId }, { providerId: userId }],
+      },
+    });
+
+    for (const booking of expiredBookings) {
+      try {
+        // Award ELO only for the requester (particulier)
+        await this.reputationService.onBookingCompleted(booking.requesterId);
+
+        await this.prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            status: BookingStatus.COMPLETED,
+            completedAt: now,
+          },
+        });
+      } catch (error) {
+        // Silently fail - don't block the user from seeing their bookings
+        console.error(`Failed to auto-complete booking ${booking.id}:`, error);
+      }
+    }
   }
 
   async cancel(userId: string, bookingId: string) {
@@ -270,6 +324,8 @@ export class BookingsService {
     // Check if this is a late cancellation (< 24h before scheduled time)
     // Only applies if booking was ACCEPTED and has a scheduled time
     let isLateCancellation = false;
+    const isProvider = booking.providerId === userId;
+
     if (
       booking.status === BookingStatus.ACCEPTED &&
       booking.scheduledAt
@@ -280,14 +336,14 @@ export class BookingsService {
 
       if (hoursUntilScheduled < 24 && hoursUntilScheduled > 0) {
         isLateCancellation = true;
-
-        // Apply penalty to the user canceling
-        await this.prisma.userReputation.upsert({
-          where: { userId },
-          update: { lateCancellationCount: { increment: 1 } },
-          create: { userId, lateCancellationCount: 1 },
-        });
+        // Apply late cancellation ELO penalty
+        await this.reputationService.onLateCancellation(userId);
       }
+    }
+
+    // Extra penalty if provider cancels after accepting (breaks trust)
+    if (isProvider && booking.status === BookingStatus.ACCEPTED && !isLateCancellation) {
+      await this.reputationService.onProviderCancelsAfterAccept(userId);
     }
 
     const updated = await this.prisma.booking.update({
@@ -353,7 +409,7 @@ export class BookingsService {
     const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: {
-        status: BookingStatus.CANCELED,
+        status: BookingStatus.REJECTED,
         rejectionMessage: message,
       },
     });
@@ -371,7 +427,7 @@ export class BookingsService {
     // Send real-time status update to requester
     this.websocketGateway.sendBookingStatusUpdate(booking.requesterId, {
       ...booking,
-      status: BookingStatus.CANCELED,
+      status: BookingStatus.REJECTED,
       rejectionMessage: message,
     });
 
@@ -379,6 +435,9 @@ export class BookingsService {
   }
 
   async findByUser(userId: string, role?: 'requester' | 'provider', from?: string, to?: string) {
+    // First, auto-complete any expired ACCEPTED bookings for this user
+    await this.autoCompleteExpiredForUser(userId);
+
     const where: any = {};
 
     if (role === 'requester') {
@@ -440,7 +499,7 @@ export class BookingsService {
     return bookings.map((booking) => {
       // Only show phone if user is the provider AND status is ACCEPTED or later
       const isProvider = booking.providerId === userId;
-      const isAcceptedOrLater = ['ACCEPTED', 'IN_PROGRESS', 'COMPLETED'].includes(booking.status);
+      const isAcceptedOrLater = ['ACCEPTED', 'COMPLETED'].includes(booking.status);
 
       if (isProvider && !isAcceptedOrLater) {
         // Hide contact info for pending bookings

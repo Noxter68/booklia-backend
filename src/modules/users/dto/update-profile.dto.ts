@@ -1,4 +1,4 @@
-import { IsOptional, IsString, IsArray, MaxLength } from 'class-validator';
+import { IsOptional, IsString, IsArray, MaxLength, IsNumber } from 'class-validator';
 
 export class UpdateProfileDto {
   @IsOptional()
@@ -23,6 +23,19 @@ export class UpdateProfileDto {
   @IsString()
   @MaxLength(100)
   city?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  address?: string;
+
+  @IsOptional()
+  @IsNumber()
+  latitude?: number;
+
+  @IsOptional()
+  @IsNumber()
+  longitude?: number;
 }
 
 export class AddProfileImageDto {

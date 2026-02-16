@@ -16,6 +16,8 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { BookingCommentsModule } from './modules/booking-comments/booking-comments.module';
 import { WebsocketModule } from './modules/websocket/websocket.module';
 import { ReputationModule } from './modules/reputation/reputation.module';
+import { GeocodingModule } from './modules/geocoding/geocoding.module';
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
@@ -38,6 +40,8 @@ import { ReputationModule } from './modules/reputation/reputation.module';
     UploadModule,
     NotificationsModule,
     BookingCommentsModule,
+    GeocodingModule,
+    AdminModule,
   ],
 })
 export class AppModule {}

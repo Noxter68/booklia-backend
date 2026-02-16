@@ -277,7 +277,12 @@ export class BusinessService {
   }
 
   async search(dto: SearchBusinessDto) {
-    const { q, city, categoryId, limit = 20, offset = 0, sortBy = 'popular' } = dto;
+    const { q, city, categoryId, lat, lng, radius = 10, limit = 20, offset = 0, sortBy = 'popular' } = dto;
+
+    // If geo search, use special method
+    if (lat !== undefined && lng !== undefined) {
+      return this.searchWithGeo(dto);
+    }
 
     const where: any = {
       isActive: true,
@@ -366,6 +371,94 @@ export class BusinessService {
       }),
       this.prisma.business.count({ where }),
     ]);
+
+    return { data, total, limit, offset };
+  }
+
+  /** Search businesses with geolocation (bounding box + Haversine distance). */
+  private async searchWithGeo(dto: SearchBusinessDto) {
+    const { q, categoryId, lat, lng, radius = 10, limit = 20, offset = 0, sortBy = 'distance' } = dto;
+    const EARTH_RADIUS_KM = 6371;
+    const KM_PER_DEGREE = 111;
+
+    // Bounding box filter for initial query
+    const latDelta = radius / KM_PER_DEGREE;
+    const lngDelta = radius / (KM_PER_DEGREE * Math.cos((lat! * Math.PI) / 180));
+
+    const where: any = {
+      isActive: true,
+      latitude: { not: null },
+      longitude: { not: null },
+      AND: [
+        { latitude: { gte: lat! - latDelta } },
+        { latitude: { lte: lat! + latDelta } },
+        { longitude: { gte: lng! - lngDelta } },
+        { longitude: { lte: lng! + lngDelta } },
+      ],
+    };
+
+    // Additional filters
+    if (q) {
+      where.AND.push({
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { description: { contains: q, mode: 'insensitive' } },
+        ],
+      });
+    }
+
+    if (categoryId) {
+      where.AND.push({
+        OR: [
+          { categoryId },
+          { services: { some: { categoryId, isActive: true } } },
+        ],
+      });
+    }
+
+    // Get all matching businesses within bounding box
+    const candidates = await this.prisma.business.findMany({
+      where,
+      include: {
+        owner: { select: { reputation: true } },
+        services: { where: { isActive: true }, take: 3 },
+        _count: {
+          select: {
+            employees: { where: { isActive: true } },
+            services: { where: { isActive: true } },
+          },
+        },
+      },
+    });
+
+    // Calculate actual distance using Haversine formula and filter
+    const businessesWithDistance = candidates
+      .map((business) => {
+        const dLat = ((business.latitude! - lat!) * Math.PI) / 180;
+        const dLng = ((business.longitude! - lng!) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) ** 2 +
+          Math.cos((lat! * Math.PI) / 180) *
+            Math.cos((business.latitude! * Math.PI) / 180) *
+            Math.sin(dLng / 2) ** 2;
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const distance = EARTH_RADIUS_KM * c;
+        return { ...business, distance };
+      })
+      .filter((b) => b.distance <= radius)
+      .sort((a, b) => {
+        if (sortBy === 'distance') return a.distance - b.distance;
+        if (sortBy === 'recent') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        // Default: popular (tier + verified)
+        const tierOrder: Record<string, number> = { PREMIUM: 3, PRO: 2, STARTER: 1 };
+        const tierDiff = (tierOrder[b.subscriptionTier] || 0) - (tierOrder[a.subscriptionTier] || 0);
+        if (tierDiff !== 0) return tierDiff;
+        if (b.isVerified !== a.isVerified) return b.isVerified ? 1 : -1;
+        return a.distance - b.distance;
+      });
+
+    const total = businessesWithDistance.length;
+    const data = businessesWithDistance.slice(offset, offset + limit);
 
     return { data, total, limit, offset };
   }

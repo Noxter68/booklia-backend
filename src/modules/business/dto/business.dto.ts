@@ -142,6 +142,14 @@ export class UpdateBusinessDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  @IsNumber()
+  @IsOptional()
+  latitude?: number;
+
+  @IsNumber()
+  @IsOptional()
+  longitude?: number;
 }
 
 export class CreateBusinessServiceDto {
@@ -237,6 +245,21 @@ export class SearchBusinessDto {
   @Type(() => Number)
   @IsNumber()
   @IsOptional()
+  lat?: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @IsOptional()
+  lng?: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  @IsOptional()
+  radius?: number; // in km, default 10
+
+  @Type(() => Number)
+  @IsNumber()
+  @IsOptional()
   limit?: number;
 
   @Type(() => Number)
@@ -246,7 +269,7 @@ export class SearchBusinessDto {
 
   @IsString()
   @IsOptional()
-  sortBy?: 'recent' | 'popular' | 'rating'; // recent = createdAt desc, popular = tier + verified, rating = by rating
+  sortBy?: 'recent' | 'popular' | 'rating' | 'distance'; // recent = createdAt desc, popular = tier + verified, rating = by rating, distance = closest first
 }
 
 // ============================================

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
+import { CacheModule } from './modules/cache/cache.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ServicesModule } from './modules/services/services.module';
@@ -25,6 +26,7 @@ import { AdminModule } from './modules/admin/admin.module';
       isGlobal: true,
     }),
     PrismaModule,
+    CacheModule,
     ReputationModule,
     WebsocketModule,
     AuthModule,

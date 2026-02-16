@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UploadService } from '../upload/upload.service';
+import { CacheService } from '../cache/cache.service';
 import {
   CreateBusinessDto,
   UpdateBusinessDto,
@@ -22,6 +23,7 @@ export class BusinessService {
   constructor(
     private prisma: PrismaService,
     private uploadService: UploadService,
+    private cacheService: CacheService,
   ) {}
 
   private generateSlug(name: string): string {
@@ -76,6 +78,9 @@ export class BusinessService {
         data: { isBusiness: true },
       }),
     ]);
+
+    // Invalidate search cache
+    await this.cacheService.delByPattern('search:business:*');
 
     return business;
   }
@@ -163,6 +168,13 @@ export class BusinessService {
   }
 
   async findBySlug(slug: string) {
+    // Check cache first
+    const cacheKey = CacheService.businessKey(slug);
+    const cached = await this.cacheService.get(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const business = await this.prisma.business.findUnique({
       where: { slug, isActive: true },
       include: {
@@ -206,6 +218,9 @@ export class BusinessService {
     if (!business) {
       throw new NotFoundException('Business non trouvé');
     }
+
+    // Cache the result
+    await this.cacheService.set(cacheKey, business, CacheService.TTL.BUSINESS_PAGE);
 
     return business;
   }
@@ -266,7 +281,7 @@ export class BusinessService {
       }
     }
 
-    return this.prisma.business.update({
+    const updated = await this.prisma.business.update({
       where: { id: business.id },
       data: dto,
       include: {
@@ -274,6 +289,14 @@ export class BusinessService {
         services: true,
       },
     });
+
+    // Invalidate caches
+    await Promise.all([
+      this.cacheService.del(CacheService.businessKey(business.slug)),
+      this.cacheService.delByPattern('search:business:*'),
+    ]);
+
+    return updated;
   }
 
   async search(dto: SearchBusinessDto) {
@@ -282,6 +305,13 @@ export class BusinessService {
     // If geo search, use special method
     if (lat !== undefined && lng !== undefined) {
       return this.searchWithGeo(dto);
+    }
+
+    // Check cache first
+    const cacheKey = CacheService.searchKey({ q, city, categoryId, limit, offset, sortBy });
+    const cached = await this.cacheService.get<{ data: any[]; total: number; limit: number; offset: number }>(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     const where: any = {
@@ -372,12 +402,29 @@ export class BusinessService {
       this.prisma.business.count({ where }),
     ]);
 
-    return { data, total, limit, offset };
+    const result = { data, total, limit, offset };
+
+    // Cache the result
+    await this.cacheService.set(cacheKey, result, CacheService.TTL.SEARCH);
+
+    return result;
   }
 
   /** Search businesses with geolocation (bounding box + Haversine distance). */
   private async searchWithGeo(dto: SearchBusinessDto) {
     const { q, categoryId, lat, lng, radius = 10, limit = 20, offset = 0, sortBy = 'distance' } = dto;
+
+    // Round lat/lng to 3 decimals (~111m precision) for better cache hit rate
+    const roundedLat = Math.round(lat! * 1000) / 1000;
+    const roundedLng = Math.round(lng! * 1000) / 1000;
+
+    // Check cache first
+    const cacheKey = CacheService.searchKey({ q, categoryId, lat: roundedLat, lng: roundedLng, radius, limit, offset, sortBy });
+    const cached = await this.cacheService.get<{ data: any[]; total: number; limit: number; offset: number }>(cacheKey);
+    if (cached) {
+      return cached;
+    }
+
     const EARTH_RADIUS_KM = 6371;
     const KM_PER_DEGREE = 111;
 
@@ -460,7 +507,12 @@ export class BusinessService {
     const total = businessesWithDistance.length;
     const data = businessesWithDistance.slice(offset, offset + limit);
 
-    return { data, total, limit, offset };
+    const result = { data, total, limit, offset };
+
+    // Cache the result
+    await this.cacheService.set(cacheKey, result, CacheService.TTL.SEARCH);
+
+    return result;
   }
 
   // ============================================

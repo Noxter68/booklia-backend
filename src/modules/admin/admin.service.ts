@@ -4,13 +4,17 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CacheService } from '../cache/cache.service';
 import { CreateBusinessDto } from './dto/create-business.dto';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 
 @Injectable()
 export class AdminService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cacheService: CacheService,
+  ) {}
 
   private generatePassword(length = 12): string {
     return randomBytes(length).toString('base64').slice(0, length);
@@ -102,6 +106,9 @@ export class AdminService {
 
       return { user, business };
     });
+
+    // Invalidate search cache
+    await this.cacheService.delByPattern('search:business:*');
 
     return {
       business: result.business,
@@ -221,10 +228,18 @@ export class AdminService {
       throw new NotFoundException('Business non trouvé');
     }
 
-    return this.prisma.business.update({
+    const updated = await this.prisma.business.update({
       where: { id: businessId },
       data: { isActive: !business.isActive },
     });
+
+    // Invalidate caches
+    await Promise.all([
+      this.cacheService.del(CacheService.businessKey(business.slug)),
+      this.cacheService.delByPattern('search:business:*'),
+    ]);
+
+    return updated;
   }
 
   async verifyBusiness(businessId: string) {
@@ -236,10 +251,18 @@ export class AdminService {
       throw new NotFoundException('Business non trouvé');
     }
 
-    return this.prisma.business.update({
+    const updated = await this.prisma.business.update({
       where: { id: businessId },
       data: { isVerified: true },
     });
+
+    // Invalidate caches
+    await Promise.all([
+      this.cacheService.del(CacheService.businessKey(business.slug)),
+      this.cacheService.delByPattern('search:business:*'),
+    ]);
+
+    return updated;
   }
 
   async toggleEarlyAdopter(businessId: string) {
@@ -251,10 +274,18 @@ export class AdminService {
       throw new NotFoundException('Business non trouvé');
     }
 
-    return this.prisma.business.update({
+    const updated = await this.prisma.business.update({
       where: { id: businessId },
       data: { isEarlyAdopter: !business.isEarlyAdopter },
     });
+
+    // Invalidate caches
+    await Promise.all([
+      this.cacheService.del(CacheService.businessKey(business.slug)),
+      this.cacheService.delByPattern('search:business:*'),
+    ]);
+
+    return updated;
   }
 
   async listUsers(page = 1, limit = 20) {

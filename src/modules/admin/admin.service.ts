@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
+import { AuthService } from '../auth/auth.service';
 import { CreateBusinessDto } from './dto/create-business.dto';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
@@ -14,6 +15,7 @@ export class AdminService {
   constructor(
     private prisma: PrismaService,
     private cacheService: CacheService,
+    private authService: AuthService,
   ) {}
 
   private generatePassword(length = 12): string {
@@ -94,6 +96,14 @@ export class AdminService {
     // Invalidate search cache
     await this.cacheService.delByPattern('search:business:*');
 
+    // Send admin invitation email (fire-and-forget, 1 day token)
+    this.authService.sendVerificationEmail(
+      result.user.id,
+      result.user.email,
+      result.user.name || `${dto.ownerFirstName} ${dto.ownerLastName}`,
+      { adminInvite: true },
+    );
+
     return {
       business: result.business,
       owner: {
@@ -119,6 +129,7 @@ export class AdminService {
               id: true,
               email: true,
               name: true,
+              emailVerified: true,
               createdAt: true,
             },
           },
@@ -247,6 +258,30 @@ export class AdminService {
     ]);
 
     return updated;
+  }
+
+  async resendVerificationEmail(businessId: string) {
+    const business = await this.prisma.business.findUnique({
+      where: { id: businessId },
+      include: { owner: true },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    if (business.owner.emailVerified) {
+      return { alreadyVerified: true };
+    }
+
+    await this.authService.sendVerificationEmail(
+      business.owner.id,
+      business.owner.email,
+      business.owner.name || 'Utilisateur',
+      { adminInvite: true },
+    );
+
+    return { sent: true };
   }
 
   async toggleEarlyAdopter(businessId: string) {

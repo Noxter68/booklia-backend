@@ -54,6 +54,11 @@ export class AdminController {
     return this.adminService.verifyBusiness(id);
   }
 
+  @Post('business/:id/resend-verification')
+  async resendVerification(@Param('id') id: string) {
+    return this.adminService.resendVerificationEmail(id);
+  }
+
   @Patch('business/:id/toggle-early-adopter')
   async toggleEarlyAdopter(@Param('id') id: string) {
     return this.adminService.toggleEarlyAdopter(id);

@@ -1,16 +1,26 @@
 import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class AuthService {
+  private readonly frontendUrl: string;
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
-  ) {}
+    private configService: ConfigService,
+    private emailService: EmailService,
+  ) {
+    this.frontendUrl =
+      configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+  }
 
   async register(dto: RegisterDto) {
     // Check if user exists
@@ -45,6 +55,9 @@ export class AuthService {
 
     // Generate tokens
     const tokens = await this.generateTokens(user.id, user.email);
+
+    // Send verification email (fire-and-forget)
+    this.sendVerificationEmail(user.id, user.email, user.name || 'Utilisateur');
 
     return {
       user: {
@@ -143,6 +156,83 @@ export class AuthService {
     return this.prisma.user.findUnique({
       where: { id: userId },
     });
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    const account = await this.prisma.account.findFirst({
+      where: { userId, providerId: 'credentials' },
+    });
+
+    if (!account || !account.password) {
+      throw new UnauthorizedException('Compte non trouvé');
+    }
+
+    const isValid = await bcrypt.compare(dto.currentPassword, account.password);
+    if (!isValid) {
+      throw new UnauthorizedException('Mot de passe actuel incorrect');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+
+    await this.prisma.account.update({
+      where: { id: account.id },
+      data: { password: hashedPassword },
+    });
+
+    return { success: true };
+  }
+
+  async sendVerificationEmail(
+    userId: string,
+    email: string,
+    name: string,
+    options?: { adminInvite?: boolean },
+  ): Promise<void> {
+    const isAdminInvite = options?.adminInvite ?? false;
+
+    const token = await this.jwtService.signAsync(
+      { sub: userId, email, purpose: 'email-verification' },
+      {
+        secret: process.env.JWT_SECRET || 'secret',
+        expiresIn: isAdminInvite ? '1d' : '15m',
+      },
+    );
+
+    const verificationUrl = `${this.frontendUrl}/auth/verify-email?token=${token}`;
+
+    if (isAdminInvite) {
+      this.emailService.sendAdminInvitation(email, {
+        userName: name,
+        appName: 'Sidely',
+        verificationUrl,
+      });
+    } else {
+      this.emailService.sendEmailVerification(email, {
+        userName: name,
+        verificationUrl,
+      });
+    }
+  }
+
+  async verifyEmail(token: string): Promise<{ success: boolean }> {
+    try {
+      const payload = this.jwtService.verify(token, {
+        secret: process.env.JWT_SECRET || 'secret',
+      });
+
+      if (payload.purpose !== 'email-verification') {
+        throw new UnauthorizedException('Token invalide');
+      }
+
+      await this.prisma.user.update({
+        where: { id: payload.sub },
+        data: { emailVerified: true },
+      });
+
+      return { success: true };
+    } catch {
+      throw new UnauthorizedException('Le lien de vérification est invalide ou a expiré');
+    }
   }
 
   private async generateTokens(userId: string, email: string) {

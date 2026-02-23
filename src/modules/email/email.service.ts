@@ -16,6 +16,14 @@ import {
   BookingReminderData,
   buildBookingReminderEmail,
 } from './templates/booking-reminder';
+import {
+  EmailVerificationData,
+  buildEmailVerificationEmail,
+} from './templates/email-verification';
+import {
+  AdminInvitationData,
+  buildAdminInvitationEmail,
+} from './templates/admin-invitation';
 
 @Injectable()
 export class EmailService {
@@ -84,6 +92,24 @@ export class EmailService {
     data: BookingReminderData,
   ): Promise<void> {
     const { subject, html } = buildBookingReminderEmail(data);
+    await this.send(to, subject, html);
+  }
+
+  /** Sends an email verification link. */
+  async sendEmailVerification(
+    to: string,
+    data: EmailVerificationData,
+  ): Promise<void> {
+    const { subject, html } = buildEmailVerificationEmail(data);
+    await this.send(to, subject, html);
+  }
+
+  /** Sends an admin invitation to verify identity. */
+  async sendAdminInvitation(
+    to: string,
+    data: AdminInvitationData,
+  ): Promise<void> {
+    const { subject, html } = buildAdminInvitationEmail(data);
     await this.send(to, subject, html);
   }
 }

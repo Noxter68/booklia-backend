@@ -28,6 +28,11 @@ export class CreateBusinessDto {
 
   @IsString()
   @IsOptional()
+  @MaxLength(50000)
+  presentation?: string;
+
+  @IsString()
+  @IsOptional()
   categoryId?: string;
 
   @IsString()
@@ -86,6 +91,11 @@ export class UpdateBusinessDto {
   @IsOptional()
   @MaxLength(1000)
   description?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(50000)
+  presentation?: string;
 
   @IsString()
   @IsOptional()
@@ -353,4 +363,67 @@ export class ReorderBusinessImagesDto {
   @IsArray()
   @IsString({ each: true })
   imageIds: string[];
+}
+
+// ============================================
+// BUSINESS PROMOTIONS
+// ============================================
+
+export class CreateBusinessPromotionDto {
+  @IsString()
+  @MinLength(2)
+  @MaxLength(200)
+  title: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(2000)
+  description?: string;
+
+  @IsString()
+  @IsOptional()
+  @ValidateIf((o) => o.imageUrl !== '' && o.imageUrl !== undefined)
+  @IsUrl()
+  imageUrl?: string;
+
+  @IsString()
+  startDate: string;
+
+  @IsString()
+  endDate: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
+}
+
+export class UpdateBusinessPromotionDto {
+  @IsString()
+  @IsOptional()
+  @MinLength(2)
+  @MaxLength(200)
+  title?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(2000)
+  description?: string;
+
+  @IsString()
+  @IsOptional()
+  @ValidateIf((o) => o.imageUrl !== '' && o.imageUrl !== undefined)
+  @IsUrl()
+  imageUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  startDate?: string;
+
+  @IsString()
+  @IsOptional()
+  endDate?: string;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
 }

@@ -16,6 +16,8 @@ import {
   UpdateBusinessHoursDto,
   CreateBusinessCategoryDto,
   UpdateBusinessCategoryDto,
+  CreateBusinessPromotionDto,
+  UpdateBusinessPromotionDto,
 } from './dto/business.dto';
 
 @Injectable()
@@ -110,6 +112,9 @@ export class BusinessService {
         images: {
           orderBy: { sortOrder: 'asc' },
         },
+        promotions: {
+          orderBy: { createdAt: 'desc' },
+        },
       },
     });
 
@@ -203,6 +208,14 @@ export class BusinessService {
         },
         images: {
           orderBy: { sortOrder: 'asc' },
+        },
+        promotions: {
+          where: {
+            isActive: true,
+            startDate: { lte: new Date() },
+            endDate: { gte: new Date() },
+          },
+          orderBy: { createdAt: 'desc' },
         },
       },
     });
@@ -898,5 +911,106 @@ export class BusinessService {
     );
 
     return this.getImages(business.id);
+  }
+
+  // ============================================
+  // BUSINESS PROMOTIONS
+  // ============================================
+
+  async getPromotions(businessId: string) {
+    return this.prisma.businessPromotion.findMany({
+      where: { businessId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async createPromotion(userId: string, dto: CreateBusinessPromotionDto) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    const promotion = await this.prisma.businessPromotion.create({
+      data: {
+        businessId: business.id,
+        title: dto.title,
+        description: dto.description,
+        imageUrl: dto.imageUrl,
+        startDate: new Date(dto.startDate),
+        endDate: new Date(dto.endDate),
+        isActive: dto.isActive ?? true,
+      },
+    });
+
+    // Invalidate cache
+    await this.cacheService.del(CacheService.businessKey(business.slug));
+
+    return promotion;
+  }
+
+  async updatePromotion(userId: string, promotionId: string, dto: UpdateBusinessPromotionDto) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    const promotion = await this.prisma.businessPromotion.findUnique({
+      where: { id: promotionId },
+    });
+
+    if (!promotion || promotion.businessId !== business.id) {
+      throw new ForbiddenException('Accès refusé');
+    }
+
+    const data: Record<string, unknown> = {};
+    if (dto.title !== undefined) data.title = dto.title;
+    if (dto.description !== undefined) data.description = dto.description;
+    if (dto.imageUrl !== undefined) data.imageUrl = dto.imageUrl;
+    if (dto.startDate !== undefined) data.startDate = new Date(dto.startDate);
+    if (dto.endDate !== undefined) data.endDate = new Date(dto.endDate);
+    if (dto.isActive !== undefined) data.isActive = dto.isActive;
+
+    const updated = await this.prisma.businessPromotion.update({
+      where: { id: promotionId },
+      data,
+    });
+
+    // Invalidate cache
+    await this.cacheService.del(CacheService.businessKey(business.slug));
+
+    return updated;
+  }
+
+  async deletePromotion(userId: string, promotionId: string) {
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+
+    if (!business) {
+      throw new NotFoundException('Business non trouvé');
+    }
+
+    const promotion = await this.prisma.businessPromotion.findUnique({
+      where: { id: promotionId },
+    });
+
+    if (!promotion || promotion.businessId !== business.id) {
+      throw new ForbiddenException('Accès refusé');
+    }
+
+    await this.prisma.businessPromotion.delete({
+      where: { id: promotionId },
+    });
+
+    // Invalidate cache
+    await this.cacheService.del(CacheService.businessKey(business.slug));
+
+    return { success: true };
   }
 }

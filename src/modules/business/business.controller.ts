@@ -23,6 +23,8 @@ import {
   UpdateVacationModeDto,
   AddBusinessImageDto,
   ReorderBusinessImagesDto,
+  CreateBusinessPromotionDto,
+  UpdateBusinessPromotionDto,
 } from './dto/business.dto';
 import { AuthGuard } from '../auth/auth.guard';
 
@@ -56,6 +58,39 @@ export class BusinessController {
   @Get('owner/:userId')
   findByOwnerId(@Param('userId') userId: string) {
     return this.businessService.findByOwnerPublic(userId);
+  }
+
+  // ============================================
+  // BUSINESS PROMOTIONS (must be before :slug)
+  // ============================================
+
+  @Get('promotions/mine')
+  @UseGuards(AuthGuard)
+  async getMyPromotions(@Req() req: any) {
+    const business = await this.businessService.findByOwner(req.user.id);
+    return this.businessService.getPromotions(business.id);
+  }
+
+  @Post('promotions')
+  @UseGuards(AuthGuard)
+  createPromotion(@Req() req: any, @Body() dto: CreateBusinessPromotionDto) {
+    return this.businessService.createPromotion(req.user.id, dto);
+  }
+
+  @Put('promotions/:id')
+  @UseGuards(AuthGuard)
+  updatePromotion(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() dto: UpdateBusinessPromotionDto,
+  ) {
+    return this.businessService.updatePromotion(req.user.id, id, dto);
+  }
+
+  @Delete('promotions/:id')
+  @UseGuards(AuthGuard)
+  deletePromotion(@Req() req: any, @Param('id') id: string) {
+    return this.businessService.deletePromotion(req.user.id, id);
   }
 
   @Get(':slug')

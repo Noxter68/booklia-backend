@@ -55,29 +55,23 @@ export class BusinessService {
       counter++;
     }
 
-    // Create business and update user
-    const [business] = await this.prisma.$transaction([
-      this.prisma.business.create({
-        data: {
-          ...dto,
-          slug,
-          ownerId: userId,
-        },
-        include: {
-          owner: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-            },
+    // Create business
+    const business = await this.prisma.business.create({
+      data: {
+        ...dto,
+        slug,
+        ownerId: userId,
+      },
+      include: {
+        owner: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
           },
         },
-      }),
-      this.prisma.user.update({
-        where: { id: userId },
-        data: { isBusiness: true },
-      }),
-    ]);
+      },
+    });
 
     // Invalidate search cache
     await this.cacheService.delByPattern('search:business:*');
@@ -135,7 +129,6 @@ export class BusinessService {
           select: {
             id: true,
             name: true,
-            reputation: true,
           },
         },
         employees: {
@@ -182,7 +175,6 @@ export class BusinessService {
           select: {
             id: true,
             name: true,
-            reputation: true,
           },
         },
         employees: {
@@ -335,14 +327,21 @@ export class BusinessService {
     }
 
     if (categoryId) {
+      // Find child category IDs so searching a parent also matches children
+      const childCategories = await this.prisma.category.findMany({
+        where: { parentId: categoryId },
+        select: { id: true },
+      });
+      const categoryIds = [categoryId, ...childCategories.map((c) => c.id)];
+
       // Search by business main category OR by having services in that category
       andConditions.push({
         OR: [
-          { categoryId },
+          { categoryId: { in: categoryIds } },
           {
             services: {
               some: {
-                categoryId,
+                categoryId: { in: categoryIds },
                 isActive: true,
               },
             },
@@ -379,11 +378,7 @@ export class BusinessService {
       this.prisma.business.findMany({
         where,
         include: {
-          owner: {
-            select: {
-              reputation: true,
-            },
-          },
+          owner: { select: { name: true } },
           services: {
             where: { isActive: true },
             take: 3,
@@ -455,10 +450,16 @@ export class BusinessService {
     }
 
     if (categoryId) {
+      const childCategories = await this.prisma.category.findMany({
+        where: { parentId: categoryId },
+        select: { id: true },
+      });
+      const categoryIds = [categoryId, ...childCategories.map((c) => c.id)];
+
       where.AND.push({
         OR: [
-          { categoryId },
-          { services: { some: { categoryId, isActive: true } } },
+          { categoryId: { in: categoryIds } },
+          { services: { some: { categoryId: { in: categoryIds }, isActive: true } } },
         ],
       });
     }
@@ -467,7 +468,7 @@ export class BusinessService {
     const candidates = await this.prisma.business.findMany({
       where,
       include: {
-        owner: { select: { reputation: true } },
+        owner: { select: { name: true } },
         services: { where: { isActive: true }, take: 3 },
         _count: {
           select: {

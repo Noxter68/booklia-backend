@@ -8,10 +8,9 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
-import { BookingStatus, ServiceKind } from '@prisma/client';
+import { BookingStatus } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
-import { ReputationService } from '../reputation/reputation.service';
 
 @Injectable()
 export class BookingsService {
@@ -20,88 +19,9 @@ export class BookingsService {
     @Inject(forwardRef(() => NotificationsService))
     private notificationsService: NotificationsService,
     private websocketGateway: WebsocketGateway,
-    private reputationService: ReputationService,
   ) {}
 
   async create(userId: string, dto: CreateBookingDto) {
-    // Business booking
-    if (dto.businessServiceId && dto.employeeId) {
-      return this.createBusinessBooking(userId, dto);
-    }
-
-    // P2P booking
-    if (!dto.serviceId) {
-      throw new BadRequestException('serviceId is required for P2P bookings');
-    }
-
-    const service = await this.prisma.service.findUnique({
-      where: { id: dto.serviceId },
-      include: { createdBy: true },
-    });
-
-    if (!service) {
-      throw new NotFoundException('Service not found');
-    }
-
-    if (service.createdByUserId === userId) {
-      throw new BadRequestException('You cannot book your own service');
-    }
-
-    // Determine requester and provider based on service kind
-    let requesterId: string;
-    let providerId: string;
-
-    if (service.kind === ServiceKind.OFFER) {
-      // User is requesting the offered service
-      requesterId = userId;
-      providerId = service.createdByUserId;
-    } else {
-      // User is offering to fulfill the request
-      requesterId = service.createdByUserId;
-      providerId = userId;
-    }
-
-    const booking = await this.prisma.booking.create({
-      data: {
-        serviceId: dto.serviceId,
-        requesterId,
-        providerId,
-        agreedPriceCents: dto.agreedPriceCents,
-        scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
-        notes: dto.notes,
-        requesterPhone: dto.requesterPhone,
-        requesterAddress: dto.requesterAddress,
-      },
-      include: {
-        service: true,
-        requester: {
-          select: {
-            id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
-          },
-        },
-        provider: {
-          select: {
-            id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
-          },
-        },
-      },
-    });
-
-    // Send notification to provider
-    const requesterName = booking.requester.profile?.displayName || 'Quelqu\'un';
-    await this.notificationsService.notifyNewBooking(
-      providerId,
-      requesterName,
-      service.title,
-      booking.id,
-    );
-
-    return booking;
-  }
-
-  private async createBusinessBooking(userId: string, dto: CreateBookingDto) {
     // Fetch business service
     const businessService = await this.prisma.businessService.findUnique({
       where: { id: dto.businessServiceId },
@@ -158,20 +78,20 @@ export class BookingsService {
         requester: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         provider: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
       },
     });
 
     // Send notification to business owner (provider)
-    const requesterName = booking.requester.profile?.displayName || 'Quelqu\'un';
+    const requesterName = booking.requester.name || 'Quelqu\'un';
     await this.notificationsService.notifyNewBooking(
       businessService.business.ownerId,
       requesterName,
@@ -195,12 +115,12 @@ export class BookingsService {
       data: { status: BookingStatus.ACCEPTED },
     });
 
-    // Send notification to requester
-    const providerName = booking.provider.profile?.displayName || 'Le prestataire';
-    const serviceTitle = booking.service?.title || booking.businessService?.name || 'un service';
+    // Send notification to requester (use business name instead of owner name)
+    const businessName = booking.businessService?.business?.name || booking.provider.name || 'Le prestataire';
+    const serviceTitle = booking.businessService?.name || 'un service';
     await this.notificationsService.notifyBookingAccepted(
       booking.requesterId,
-      providerName,
+      businessName,
       serviceTitle,
       bookingId,
     );
@@ -222,9 +142,6 @@ export class BookingsService {
       throw new BadRequestException('Booking must be ACCEPTED to complete');
     }
 
-    // Award ELO only for the requester (particulier) - businesses only get reviews
-    await this.reputationService.onBookingCompleted(booking.requesterId);
-
     return this.prisma.booking.update({
       where: { id: bookingId },
       data: {
@@ -236,12 +153,10 @@ export class BookingsService {
 
   /**
    * Auto-complete bookings that have passed their scheduled time
-   * Called by a cron job or scheduler
    */
   async autoCompleteExpiredBookings() {
     const now = new Date();
 
-    // Find all ACCEPTED bookings where scheduledAt has passed
     const expiredBookings = await this.prisma.booking.findMany({
       where: {
         status: BookingStatus.ACCEPTED,
@@ -254,9 +169,6 @@ export class BookingsService {
     const results = [];
     for (const booking of expiredBookings) {
       try {
-        // Award ELO only for the requester (particulier)
-        await this.reputationService.onBookingCompleted(booking.requesterId);
-
         await this.prisma.booking.update({
           where: { id: booking.id },
           data: {
@@ -275,12 +187,10 @@ export class BookingsService {
 
   /**
    * Lazy auto-complete: check and complete expired bookings for a specific user
-   * Called when fetching bookings to ensure the list is always up-to-date
    */
   private async autoCompleteExpiredForUser(userId: string) {
     const now = new Date();
 
-    // Find all ACCEPTED bookings for this user where scheduledAt has passed
     const expiredBookings = await this.prisma.booking.findMany({
       where: {
         status: BookingStatus.ACCEPTED,
@@ -293,9 +203,6 @@ export class BookingsService {
 
     for (const booking of expiredBookings) {
       try {
-        // Award ELO only for the requester (particulier)
-        await this.reputationService.onBookingCompleted(booking.requesterId);
-
         await this.prisma.booking.update({
           where: { id: booking.id },
           data: {
@@ -304,7 +211,6 @@ export class BookingsService {
           },
         });
       } catch (error) {
-        // Silently fail - don't block the user from seeing their bookings
         console.error(`Failed to auto-complete booking ${booking.id}:`, error);
       }
     }
@@ -321,31 +227,6 @@ export class BookingsService {
       throw new BadRequestException('Cannot cancel a completed or already canceled booking');
     }
 
-    // Check if this is a late cancellation (< 24h before scheduled time)
-    // Only applies if booking was ACCEPTED and has a scheduled time
-    let isLateCancellation = false;
-    const isProvider = booking.providerId === userId;
-
-    if (
-      booking.status === BookingStatus.ACCEPTED &&
-      booking.scheduledAt
-    ) {
-      const now = new Date();
-      const scheduledTime = new Date(booking.scheduledAt);
-      const hoursUntilScheduled = (scheduledTime.getTime() - now.getTime()) / (1000 * 60 * 60);
-
-      if (hoursUntilScheduled < 24 && hoursUntilScheduled > 0) {
-        isLateCancellation = true;
-        // Apply late cancellation ELO penalty
-        await this.reputationService.onLateCancellation(userId);
-      }
-    }
-
-    // Extra penalty if provider cancels after accepting (breaks trust)
-    if (isProvider && booking.status === BookingStatus.ACCEPTED && !isLateCancellation) {
-      await this.reputationService.onProviderCancelsAfterAccept(userId);
-    }
-
     const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: { status: BookingStatus.CANCELED },
@@ -354,9 +235,9 @@ export class BookingsService {
     // Determine who is canceling and notify the other party
     const isRequester = booking.requesterId === userId;
     const cancellerName = isRequester
-      ? booking.requester.profile?.displayName || 'Le demandeur'
-      : booking.provider.profile?.displayName || 'Le prestataire';
-    const serviceTitle = booking.service?.title || booking.businessService?.name || 'un service';
+      ? booking.requester.name || 'Le demandeur'
+      : booking.businessService?.business?.name || booking.provider.name || 'Le prestataire';
+    const serviceTitle = booking.businessService?.name || 'un service';
     const otherUserId = isRequester ? booking.providerId : booking.requesterId;
 
     await this.notificationsService.notifyBookingCanceled(
@@ -372,19 +253,16 @@ export class BookingsService {
       status: BookingStatus.CANCELED,
     });
 
-    return { ...updated, isLateCancellation };
+    return updated;
   }
 
-  // Allow either party to delete a canceled booking from their view
   async deleteByRequester(userId: string, bookingId: string) {
     const booking = await this.findOneOrFail(bookingId);
 
-    // Either party can delete the booking
     if (booking.requesterId !== userId && booking.providerId !== userId) {
       throw new ForbiddenException('You are not part of this booking');
     }
 
-    // Can only delete if status is CANCELED
     if (booking.status !== BookingStatus.CANCELED) {
       throw new BadRequestException('Only canceled bookings can be deleted');
     }
@@ -397,7 +275,6 @@ export class BookingsService {
   async reject(userId: string, bookingId: string, message?: string) {
     const booking = await this.findOneOrFail(bookingId);
 
-    // Only the provider can reject
     if (booking.providerId !== userId) {
       throw new ForbiddenException('Only the provider can reject a booking');
     }
@@ -414,12 +291,12 @@ export class BookingsService {
       },
     });
 
-    // Send notification to requester
-    const providerName = booking.provider.profile?.displayName || 'Le prestataire';
-    const serviceTitle = booking.service?.title || booking.businessService?.name || 'un service';
+    // Send notification to requester (use business name instead of owner name)
+    const businessName = booking.businessService?.business?.name || booking.provider.name || 'Le prestataire';
+    const serviceTitle = booking.businessService?.name || 'un service';
     await this.notificationsService.notifyBookingRejected(
       booking.requesterId,
-      providerName,
+      businessName,
       serviceTitle,
       bookingId,
     );
@@ -459,14 +336,9 @@ export class BookingsService {
       }
     }
 
-    const bookings = await this.prisma.booking.findMany({
+    return this.prisma.booking.findMany({
       where,
       include: {
-        // P2P booking relations
-        service: {
-          select: { id: true, title: true, kind: true },
-        },
-        // Business booking relations
         businessService: {
           include: {
             business: {
@@ -477,42 +349,21 @@ export class BookingsService {
         employee: {
           select: { id: true, firstName: true, lastName: true, avatarUrl: true },
         },
-        // Common relations
         requester: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         provider: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         reviews: true,
       },
       orderBy: { createdAt: 'desc' },
-    });
-
-    // Hide requesterPhone if booking is not accepted (for provider view)
-    return bookings.map((booking) => {
-      // Only show phone if user is the provider AND status is ACCEPTED or later
-      const isProvider = booking.providerId === userId;
-      const isAcceptedOrLater = ['ACCEPTED', 'COMPLETED'].includes(booking.status);
-
-      if (isProvider && !isAcceptedOrLater) {
-        // Hide contact info for pending bookings
-        return {
-          ...booking,
-          requesterPhone: null,
-          requesterAddress: null,
-        };
-      }
-
-      // For requester view, always show their own contact info
-      // For provider view with accepted status, show contact info
-      return booking;
     });
   }
 
@@ -520,7 +371,6 @@ export class BookingsService {
     return this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        service: true,
         businessService: {
           include: {
             business: true,
@@ -530,13 +380,13 @@ export class BookingsService {
         requester: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         provider: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         reviews: true,

@@ -21,11 +21,11 @@ export class CategoriesService {
       include: {
         children: {
           include: {
-            _count: { select: { services: true } },
+            _count: { select: { businessServices: true } },
           },
           orderBy: { name: 'asc' },
         },
-        _count: { select: { services: true } },
+        _count: { select: { businessServices: true } },
       },
       where: { parentId: null },
       orderBy: { name: 'asc' },
@@ -43,11 +43,11 @@ export class CategoriesService {
       include: {
         children: {
           include: {
-            _count: { select: { services: true } },
+            _count: { select: { businessServices: true } },
           },
         },
         parent: true,
-        _count: { select: { services: true } },
+        _count: { select: { businessServices: true } },
       },
     });
   }
@@ -58,11 +58,11 @@ export class CategoriesService {
       include: {
         children: {
           include: {
-            _count: { select: { services: true } },
+            _count: { select: { businessServices: true } },
           },
         },
         parent: true,
-        _count: { select: { services: true } },
+        _count: { select: { businessServices: true } },
       },
     });
   }

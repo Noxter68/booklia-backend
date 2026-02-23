@@ -26,15 +26,6 @@ export class StripeController {
     return this.stripeService.createSubscriptionCheckout(user.id, priceId);
   }
 
-  @Post('boost')
-  @UseGuards(AuthGuard)
-  async createBoost(
-    @CurrentUser() user: User,
-    @Body('serviceId') serviceId: string,
-  ) {
-    return this.stripeService.createBoostCheckout(user.id, serviceId);
-  }
-
   @Post('portal')
   @UseGuards(AuthGuard)
   async createPortal(@CurrentUser() user: User) {

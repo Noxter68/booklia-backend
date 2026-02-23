@@ -9,7 +9,6 @@ interface CreateNotificationDto {
   title: string;
   message: string;
   bookingId?: string;
-  serviceId?: string;
 }
 
 @Injectable()
@@ -27,7 +26,6 @@ export class NotificationsService {
         title: data.title,
         message: data.message,
         bookingId: data.bookingId,
-        serviceId: data.serviceId,
       },
     });
 

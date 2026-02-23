@@ -52,14 +52,13 @@ export class AdminService {
       slug = `${slug}-${randomBytes(3).toString('hex')}`;
     }
 
-    // Create user, account, profile, reputation, and business in transaction
+    // Create user, account, and business in transaction
     const result = await this.prisma.$transaction(async (tx) => {
       // Create user
       const user = await tx.user.create({
         data: {
           email: dto.ownerEmail,
           name: `${dto.ownerFirstName} ${dto.ownerLastName}`,
-          isBusiness: true,
         },
       });
 
@@ -70,21 +69,6 @@ export class AdminService {
           accountId: user.id,
           providerId: 'credentials',
           password: hashedPassword,
-        },
-      });
-
-      // Create profile
-      await tx.profile.create({
-        data: {
-          userId: user.id,
-          displayName: `${dto.ownerFirstName} ${dto.ownerLastName}`,
-        },
-      });
-
-      // Create reputation
-      await tx.userReputation.create({
-        data: {
-          userId: user.id,
         },
       });
 
@@ -288,37 +272,4 @@ export class AdminService {
     return updated;
   }
 
-  async listUsers(page = 1, limit = 20) {
-    const skip = (page - 1) * limit;
-
-    const [users, total] = await Promise.all([
-      this.prisma.user.findMany({
-        where: {
-          isBusiness: false,
-        },
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          profile: true,
-          reputation: true,
-        },
-      }),
-      this.prisma.user.count({
-        where: {
-          isBusiness: false,
-        },
-      }),
-    ]);
-
-    return {
-      data: users,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
-  }
 }

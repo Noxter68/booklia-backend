@@ -23,28 +23,16 @@ model User {
   emailVerified Boolean   @default(false)
   image         String?
 
-  // Business flag
-  isBusiness Boolean @default(false)
-
   // Admin flag
   isAdmin Boolean @default(false)
 
-  // Stripe
-  stripeCustomerId     String?              @unique
-  stripeSubscriptionId String?
-  subscriptionStatus   SubscriptionStatus   @default(FREE)
-
   // Relations
-  profile           Profile?
   sessions          Session[]
   accounts          Account[]
-  createdServices   Service[]
   bookingsAsRequester Booking[] @relation("BookingRequester")
   bookingsAsProvider  Booking[] @relation("BookingProvider")
   reviewsWritten    Review[]  @relation("ReviewAuthor")
   reviewsReceived   Review[]  @relation("ReviewTarget")
-  reputation        UserReputation?
-  bookingComments   BookingComment[]
   notifications     Notification[]
 
   // Business relations
@@ -293,112 +281,8 @@ model EmployeeService {
 }
 
 // ============================================
-// PROFILE
+// CATEGORY
 // ============================================
-
-model Profile {
-  userId      String  @id
-  displayName String?
-  avatarUrl   String?
-  coverUrl    String?
-  bio         String?
-  city        String?
-  address     String?
-  latitude    Float?
-  longitude   Float?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  images PeopleImage[]
-}
-
-model PeopleImage {
-  id        String @id @default(cuid())
-  profileId String
-  url       String
-  sortOrder Int    @default(0)
-
-  createdAt DateTime @default(now())
-
-  profile Profile @relation(fields: [profileId], references: [userId], onDelete: Cascade)
-
-  @@index([profileId])
-}
-
-// ============================================
-// SERVICE
-// ============================================
-
-model Service {
-  id          String        @id @default(cuid())
-  kind        ServiceKind
-  title       String
-  description String
-
-  // Pricing
-  priceCents      Int?
-  pricingType     String  @default("HOURLY") // "HOURLY" or "FIXED"
-  currency        String  @default("EUR")
-
-  // Duration (in minutes)
-  durationMinutes Int?
-
-  // Availability
-  availableDays     String[] // e.g. ["MONDAY", "TUESDAY", "WEDNESDAY"]
-  availableFromTime String?  // e.g. "09:00"
-  availableToTime   String?  // e.g. "18:00"
-  availableFromDate DateTime?
-  availableToDate   DateTime?
-
-  // Location
-  city      String?
-  latitude  Float?
-  longitude Float?
-
-  // Category & Tags
-  categoryId String?
-  category   Category? @relation(fields: [categoryId], references: [id])
-  tags       ServiceTag[]
-
-  // Owner
-  createdByUserId String
-  createdBy       User   @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
-
-  // Status
-  status ServiceStatus @default(DRAFT)
-
-  // Time
-  deadlineAt DateTime?
-  expiresAt  DateTime
-
-  // Urgency
-  urgency Urgency @default(FLEXIBLE)
-
-  // Recurrence
-  isRecurring    Boolean     @default(false)
-  recurrence     Recurrence  @default(ONE_TIME)
-  sessionsCount  Int?
-
-  // Boost
-  boostedUntil DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  bookings Booking[]
-
-  @@index([kind])
-  @@index([status])
-  @@index([categoryId])
-  @@index([createdByUserId])
-  @@index([expiresAt])
-  @@index([boostedUntil])
-  @@index([city])
-  @@index([latitude, longitude])
-}
 
 model Category {
   id       String  @id @default(cuid())
@@ -408,26 +292,8 @@ model Category {
 
   parent           Category?         @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children         Category[]        @relation("CategoryHierarchy")
-  services         Service[]
   businessServices BusinessService[]
   businesses       Business[]
-}
-
-model Tag {
-  id   String @id @default(cuid())
-  name String @unique
-
-  services ServiceTag[]
-}
-
-model ServiceTag {
-  serviceId String
-  tagId     String
-
-  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
-
-  @@id([serviceId, tagId])
 }
 
 // ============================================
@@ -437,14 +303,13 @@ model ServiceTag {
 model Booking {
   id        String @id @default(cuid())
 
-  // For P2P bookings (individual services)
-  serviceId   String?
+  // Users involved
   requesterId String
   providerId  String
 
-  // For Business bookings
-  businessServiceId String?
-  employeeId        String?
+  // Business booking
+  businessServiceId String
+  employeeId        String
 
   status BookingStatus @default(PENDING)
 
@@ -456,10 +321,6 @@ model Booking {
   // Client notes
   notes String?
 
-  // P2P booking contact info (revealed only when accepted)
-  requesterPhone   String?
-  requesterAddress String?
-
   // Rejection message (when provider declines)
   rejectionMessage String?
 
@@ -467,42 +328,18 @@ model Booking {
   updatedAt DateTime @updatedAt
 
   // Relations
-  service         Service?         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  businessService BusinessService? @relation(fields: [businessServiceId], references: [id], onDelete: Cascade)
-  employee        Employee?        @relation(fields: [employeeId], references: [id])
-  requester       User             @relation("BookingRequester", fields: [requesterId], references: [id])
-  provider        User             @relation("BookingProvider", fields: [providerId], references: [id])
+  businessService BusinessService @relation(fields: [businessServiceId], references: [id], onDelete: Cascade)
+  employee        Employee        @relation(fields: [employeeId], references: [id])
+  requester       User            @relation("BookingRequester", fields: [requesterId], references: [id])
+  provider        User            @relation("BookingProvider", fields: [providerId], references: [id])
   reviews         Review[]
-  comments        BookingComment[]
 
-  @@index([serviceId])
   @@index([businessServiceId])
   @@index([employeeId])
   @@index([requesterId])
   @@index([providerId])
   @@index([status])
   @@index([scheduledAt])
-}
-
-// ============================================
-// BOOKING COMMENTS
-// ============================================
-
-model BookingComment {
-  id        String   @id @default(cuid())
-  bookingId String
-  authorId  String
-  content   String
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
-
-  @@index([bookingId])
-  @@index([authorId])
 }
 
 // ============================================
@@ -518,7 +355,6 @@ model Notification {
 
   // Reference to related entity
   bookingId String?
-  serviceId String?
 
   isRead    Boolean          @default(false)
 
@@ -559,31 +395,6 @@ model Review {
 }
 
 // ============================================
-// REPUTATION
-// ============================================
-
-model UserReputation {
-  userId     String @id
-
-  // ELO-style trust score (starts at 1000, goes up/down)
-  elo         Int    @default(1000)
-
-  // Rating stats
-  ratingAvg5  Float  @default(0)
-  ratingCount Int    @default(0)
-
-  // Activity stats
-  completedBookings Int @default(0)
-
-  // Penalty tracking
-  lateCancellationCount Int @default(0)
-
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-// ============================================
 // ENUMS
 // ============================================
 
@@ -591,31 +402,6 @@ enum SubscriptionStatus {
   FREE
   PRO
   CANCELED
-}
-
-enum ServiceKind {
-  OFFER
-  REQUEST
-}
-
-enum ServiceStatus {
-  DRAFT
-  PUBLISHED
-  PAUSED
-}
-
-enum Urgency {
-  URGENT
-  SOON
-  FLEXIBLE
-}
-
-enum Recurrence {
-  ONE_TIME
-  WEEKLY
-  BIWEEKLY
-  MONTHLY
-  CUSTOM
 }
 
 enum BookingStatus {
@@ -628,7 +414,6 @@ enum BookingStatus {
 
 enum ReviewType {
   REVIEW_PROVIDER
-  REVIEW_REQUESTER
 }
 
 enum BusinessTier {
@@ -643,6 +428,5 @@ enum NotificationType {
   BOOKING_REJECTED      // Your booking was rejected
   BOOKING_CANCELED      // Booking was canceled
   BOOKING_COMPLETED     // Booking was completed
-  BOOKING_COMMENT       // New comment on booking
   REVIEW_RECEIVED       // Someone left you a review
 }

@@ -58,15 +58,4 @@ export class AdminController {
   async toggleEarlyAdopter(@Param('id') id: string) {
     return this.adminService.toggleEarlyAdopter(id);
   }
-
-  @Get('users')
-  async listUsers(
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
-    return this.adminService.listUsers(
-      page ? parseInt(page, 10) : 1,
-      limit ? parseInt(limit, 10) : 20,
-    );
-  }
 }

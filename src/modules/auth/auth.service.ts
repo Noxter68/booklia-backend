@@ -30,7 +30,6 @@ export class AuthService {
       data: {
         email: dto.email,
         name: `${dto.firstName} ${dto.lastName}`,
-        isBusiness: dto.isBusiness || false,
       },
     });
 
@@ -44,21 +43,6 @@ export class AuthService {
       },
     });
 
-    // Create profile
-    await this.prisma.profile.create({
-      data: {
-        userId: user.id,
-        displayName: `${dto.firstName} ${dto.lastName}`,
-      },
-    });
-
-    // Create initial reputation
-    await this.prisma.userReputation.create({
-      data: {
-        userId: user.id,
-      },
-    });
-
     // Generate tokens
     const tokens = await this.generateTokens(user.id, user.email);
 
@@ -67,7 +51,6 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
-        isBusiness: user.isBusiness,
       },
       ...tokens,
     };
@@ -110,7 +93,6 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
-        isBusiness: user.isBusiness,
       },
       ...tokens,
     };
@@ -123,7 +105,6 @@ export class AuthService {
       });
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
-        include: { profile: true, reputation: true },
       });
 
       if (!user) {
@@ -159,7 +140,6 @@ export class AuthService {
   async getUserById(userId: string) {
     return this.prisma.user.findUnique({
       where: { id: userId },
-      include: { profile: true, reputation: true },
     });
   }
 

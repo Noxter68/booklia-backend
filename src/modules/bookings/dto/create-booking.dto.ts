@@ -1,10 +1,11 @@
-import { IsString, IsOptional, IsInt, IsDateString, Min, ValidateIf } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsDateString, Min } from 'class-validator';
 
 export class CreateBookingDto {
-  // For P2P services
-  @ValidateIf((o) => !o.businessServiceId)
   @IsString()
-  serviceId?: string;
+  businessServiceId: string;
+
+  @IsString()
+  employeeId: string;
 
   @IsOptional()
   @IsInt()
@@ -15,27 +16,9 @@ export class CreateBookingDto {
   @IsDateString()
   scheduledAt?: string;
 
-  // For Business bookings
-  @ValidateIf((o) => !o.serviceId)
-  @IsString()
-  businessServiceId?: string;
-
-  @ValidateIf((o) => !!o.businessServiceId)
-  @IsString()
-  employeeId?: string;
-
   @IsOptional()
   @IsString()
   notes?: string;
-
-  // P2P booking contact info
-  @ValidateIf((o) => !!o.serviceId)
-  @IsString()
-  requesterPhone?: string;
-
-  @IsOptional()
-  @IsString()
-  requesterAddress?: string;
 }
 
 export class RejectBookingDto {

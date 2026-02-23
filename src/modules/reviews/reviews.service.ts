@@ -7,14 +7,10 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { BookingStatus, ReviewType } from '@prisma/client';
-import { ReputationService } from '../reputation/reputation.service';
 
 @Injectable()
 export class ReviewsService {
-  constructor(
-    private prisma: PrismaService,
-    private reputationService: ReputationService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async create(userId: string, dto: CreateReviewDto) {
     const booking = await this.prisma.booking.findUnique({
@@ -30,62 +26,30 @@ export class ReviewsService {
       throw new BadRequestException('Can only review completed bookings');
     }
 
-    // Determine who can leave which type of review
+    // Only the requester (client) can review the provider (business)
     const isRequester = booking.requesterId === userId;
-    const isProvider = booking.providerId === userId;
 
-    if (!isRequester && !isProvider) {
-      throw new ForbiddenException('You are not part of this booking');
-    }
-
-    // Validate review type matches user role
-    if (dto.type === ReviewType.REVIEW_PROVIDER && !isRequester) {
-      throw new ForbiddenException('Only the requester can review the provider');
-    }
-
-    if (dto.type === ReviewType.REVIEW_REQUESTER && !isProvider) {
-      throw new ForbiddenException('Only the provider can review the requester');
+    if (!isRequester) {
+      throw new ForbiddenException('Only the client can review the business');
     }
 
     // Check if review already exists
-    const existingReview = booking.reviews.find((r) => r.type === dto.type);
+    const existingReview = booking.reviews.find((r) => r.type === ReviewType.REVIEW_PROVIDER);
     if (existingReview) {
       throw new BadRequestException('Review already exists for this booking');
     }
-
-    // Determine target user
-    const targetUserId =
-      dto.type === ReviewType.REVIEW_PROVIDER
-        ? booking.providerId
-        : booking.requesterId;
 
     // Create the review
     const review = await this.prisma.review.create({
       data: {
         bookingId: dto.bookingId,
         authorId: userId,
-        targetUserId,
-        type: dto.type,
+        targetUserId: booking.providerId,
+        type: ReviewType.REVIEW_PROVIDER,
         score: dto.score,
         comment: dto.comment,
       },
     });
-
-    // Get current reputation for the target user
-    const targetReputation = await this.prisma.userReputation.findUnique({
-      where: { userId: targetUserId },
-    });
-
-    // Update target's reputation (ELO + rating average)
-    await this.reputationService.onReviewReceived(
-      targetUserId,
-      dto.score,
-      targetReputation?.ratingAvg5 ?? 0,
-      targetReputation?.ratingCount ?? 0,
-    );
-
-    // Award ELO to the reviewer for leaving a review
-    await this.reputationService.onReviewGiven(userId);
 
     return review;
   }
@@ -97,12 +61,11 @@ export class ReviewsService {
         author: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         booking: {
           select: {
-            service: { select: { title: true } },
             businessService: { select: { name: true } },
           },
         },
@@ -112,7 +75,6 @@ export class ReviewsService {
   }
 
   async findByBusiness(businessId: string) {
-    // Find the business to get the owner ID
     const business = await this.prisma.business.findUnique({
       where: { id: businessId },
       select: { ownerId: true },
@@ -122,19 +84,15 @@ export class ReviewsService {
       throw new NotFoundException('Business not found');
     }
 
-    // Find all reviews targeting the business owner for business bookings
     return this.prisma.review.findMany({
       where: {
         targetUserId: business.ownerId,
-        booking: {
-          businessServiceId: { not: null },
-        },
       },
       include: {
         author: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         booking: {
@@ -170,7 +128,6 @@ export class ReviewsService {
       throw new NotFoundException('Review not found');
     }
 
-    // Check that the user is the business owner
     if (!review.booking.businessService?.business) {
       throw new BadRequestException('Can only reply to business reviews');
     }

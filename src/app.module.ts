@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
 import { CacheModule } from './modules/cache/cache.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -14,12 +15,14 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { WebsocketModule } from './modules/websocket/websocket.module';
 import { GeocodingModule } from './modules/geocoding/geocoding.module';
 import { AdminModule } from './modules/admin/admin.module';
+import { EmailModule } from './modules/email/email.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ScheduleModule.forRoot(),
     PrismaModule,
     CacheModule,
     WebsocketModule,
@@ -34,6 +37,7 @@ import { AdminModule } from './modules/admin/admin.module';
     NotificationsModule,
     GeocodingModule,
     AdminModule,
+    EmailModule,
   ],
 })
 export class AppModule {}

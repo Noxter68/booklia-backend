@@ -324,6 +324,9 @@ model Booking {
   // Rejection message (when provider declines)
   rejectionMessage String?
 
+  // Email reminder tracking
+  reminderSentAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

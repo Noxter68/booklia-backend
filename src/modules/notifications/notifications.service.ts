@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationType } from '@prisma/client';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
+import { EmailService } from '../email/email.service';
 
 interface CreateNotificationDto {
   userId: string;
@@ -13,10 +15,18 @@ interface CreateNotificationDto {
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+  private readonly frontendUrl: string;
+
   constructor(
     private prisma: PrismaService,
     private websocketGateway: WebsocketGateway,
-  ) {}
+    private emailService: EmailService,
+    private config: ConfigService,
+  ) {
+    this.frontendUrl =
+      config.get<string>('FRONTEND_URL') || 'http://localhost:3000';
+  }
 
   async create(data: CreateNotificationDto) {
     const notification = await this.prisma.notification.create({
@@ -74,6 +84,7 @@ export class NotificationsService {
   }
 
   // Helper methods to create specific notification types
+
   async notifyNewBooking(providerId: string, requesterName: string, serviceTitle: string, bookingId: string) {
     return this.create({
       userId: providerId,
@@ -85,13 +96,16 @@ export class NotificationsService {
   }
 
   async notifyBookingAccepted(requesterId: string, providerName: string, serviceTitle: string, bookingId: string) {
-    return this.create({
+    await this.create({
       userId: requesterId,
       type: 'BOOKING_ACCEPTED',
       title: 'Demande acceptée',
       message: `${providerName} a accepté votre demande pour "${serviceTitle}"`,
       bookingId,
     });
+
+    // Send confirmation email to the client (fire-and-forget)
+    this.sendBookingAcceptedEmail(bookingId);
   }
 
   async notifyBookingRejected(requesterId: string, providerName: string, serviceTitle: string, bookingId: string) {
@@ -105,13 +119,16 @@ export class NotificationsService {
   }
 
   async notifyBookingCanceled(otherUserId: string, cancellerName: string, serviceTitle: string, bookingId: string) {
-    return this.create({
+    await this.create({
       userId: otherUserId,
       type: 'BOOKING_CANCELED',
       title: 'Réservation annulée',
       message: `${cancellerName} a annulé la réservation pour "${serviceTitle}"`,
       bookingId,
     });
+
+    // Send cancellation email to the client (fire-and-forget)
+    this.sendBookingCanceledEmail(bookingId, cancellerName);
   }
 
   async notifyReviewReceived(userId: string, reviewerName: string, bookingId: string) {
@@ -121,6 +138,81 @@ export class NotificationsService {
       title: 'Nouvel avis',
       message: `${reviewerName} vous a laissé un avis`,
       bookingId,
+    });
+  }
+
+  // --- Private email helpers ---
+
+  /**
+   * Fetches full booking data and sends a confirmation email to the requester.
+   * Errors are caught and logged — never blocks the main flow.
+   */
+  private async sendBookingAcceptedEmail(bookingId: string): Promise<void> {
+    try {
+      const booking = await this.getBookingWithDetails(bookingId);
+      if (!booking?.requester.email) return;
+
+      await this.emailService.sendBookingAccepted(booking.requester.email, {
+        clientName: booking.requester.name || 'Client',
+        businessName: booking.businessService.business.name,
+        serviceName: booking.businessService.name,
+        employeeName: `${booking.employee.firstName} ${booking.employee.lastName}`,
+        scheduledAt: booking.scheduledAt!,
+        durationMinutes: booking.businessService.durationMinutes,
+        priceCents: booking.agreedPriceCents || booking.businessService.priceCents,
+        address: booking.businessService.business.address || '',
+        city: booking.businessService.business.city || '',
+        frontendUrl: this.frontendUrl,
+      });
+    } catch (err) {
+      this.logger.error(`Failed to send booking accepted email for ${bookingId}`, err);
+    }
+  }
+
+  /**
+   * Fetches full booking data and sends a cancellation email to the requester.
+   * Errors are caught and logged — never blocks the main flow.
+   */
+  private async sendBookingCanceledEmail(bookingId: string, cancellerName: string): Promise<void> {
+    try {
+      const booking = await this.getBookingWithDetails(bookingId);
+      if (!booking?.requester.email) return;
+
+      await this.emailService.sendBookingCanceled(booking.requester.email, {
+        clientName: booking.requester.name || 'Client',
+        businessName: booking.businessService.business.name,
+        serviceName: booking.businessService.name,
+        scheduledAt: booking.scheduledAt,
+        canceledBy: cancellerName,
+        frontendUrl: this.frontendUrl,
+      });
+    } catch (err) {
+      this.logger.error(`Failed to send booking canceled email for ${bookingId}`, err);
+    }
+  }
+
+  /**
+   * Fetches a booking with all relations needed for email templates.
+   */
+  private async getBookingWithDetails(bookingId: string) {
+    return this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: {
+        requester: { select: { name: true, email: true } },
+        employee: { select: { firstName: true, lastName: true } },
+        businessService: {
+          include: {
+            business: {
+              select: {
+                name: true,
+                address: true,
+                city: true,
+                postalCode: true,
+              },
+            },
+          },
+        },
+      },
     });
   }
 }

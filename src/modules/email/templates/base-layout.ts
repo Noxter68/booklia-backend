@@ -1,8 +1,8 @@
 // Shared HTML email layout for all Sidely transactional emails.
 // Uses inline styles for maximum email client compatibility.
 
-const BRAND_COLOR = '#6C5CE7';
-const BRAND_COLOR_DARK = '#5A4BD1';
+const BRAND_COLOR = '#1A1A1A';
+const BRAND_COLOR_DARK = '#000000';
 const TEXT_COLOR = '#2D3436';
 const TEXT_MUTED = '#636E72';
 const BG_COLOR = '#F8F9FA';

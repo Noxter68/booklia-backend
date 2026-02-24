@@ -151,6 +151,10 @@ export class UpdateBusinessDto {
 
   @IsBoolean()
   @IsOptional()
+  autoAcceptBookings?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
   isActive?: boolean;
 
   @IsNumber()

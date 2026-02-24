@@ -57,6 +57,9 @@ export class BookingsService {
       scheduledEndAt = new Date(scheduledAt.getTime() + businessService.durationMinutes * 60000);
     }
 
+    // Check if business has auto-accept enabled
+    const autoAccept = businessService.business.autoAcceptBookings;
+
     // The requester is the user booking, the provider is the business owner
     const booking = await this.prisma.booking.create({
       data: {
@@ -67,6 +70,7 @@ export class BookingsService {
         agreedPriceCents: businessService.priceCents,
         scheduledAt,
         scheduledEndAt,
+        ...(autoAccept && { status: BookingStatus.ACCEPTED }),
       },
       include: {
         businessService: {
@@ -90,14 +94,32 @@ export class BookingsService {
       },
     });
 
-    // Send notification to business owner (provider)
-    const requesterName = booking.requester.name || 'Quelqu\'un';
-    await this.notificationsService.notifyNewBooking(
-      businessService.business.ownerId,
-      requesterName,
-      businessService.name,
-      booking.id,
-    );
+    if (autoAccept) {
+      // Auto-accept: notify the client (same flow as manual accept)
+      const businessName = businessService.business.name;
+      const serviceTitle = businessService.name;
+      await this.notificationsService.notifyBookingAccepted(
+        userId,
+        businessName,
+        serviceTitle,
+        booking.id,
+      );
+
+      // Send real-time status update to requester
+      this.websocketGateway.sendBookingStatusUpdate(userId, {
+        ...booking,
+        status: BookingStatus.ACCEPTED,
+      });
+    } else {
+      // Send notification to business owner (provider)
+      const requesterName = booking.requester.name || 'Quelqu\'un';
+      await this.notificationsService.notifyNewBooking(
+        businessService.business.ownerId,
+        requesterName,
+        businessService.name,
+        booking.id,
+      );
+    }
 
     return booking;
   }

@@ -41,6 +41,10 @@ export class CreateBusinessDto {
   longitude?: number;
 
   @IsOptional()
+  @IsString()
+  categoryId?: string;
+
+  @IsOptional()
   @IsBoolean()
   isEarlyAdopter?: boolean;
 }

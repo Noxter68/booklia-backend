@@ -1,5 +1,5 @@
 {
-  "name": "sidely-backend",
+  "name": "booklia-backend",
   "version": "1.0.0",
   "main": "dist/main.js",
   "scripts": {

@@ -87,6 +87,7 @@ export class AdminService {
           latitude: dto.latitude,
           longitude: dto.longitude,
           isEarlyAdopter: dto.isEarlyAdopter ?? false,
+          ...(dto.categoryId && { categoryId: dto.categoryId }),
         },
       });
 

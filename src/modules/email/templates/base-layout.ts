@@ -1,4 +1,4 @@
-// Shared HTML email layout for all Sidely transactional emails.
+// Shared HTML email layout for all Booklia transactional emails.
 // Uses inline styles for maximum email client compatibility.
 
 const BRAND_COLOR = '#1A1A1A';
@@ -9,7 +9,7 @@ const BG_COLOR = '#F8F9FA';
 const CARD_BG = '#FFFFFF';
 
 /**
- * Wraps email content in the Sidely branded layout (header + footer).
+ * Wraps email content in the Booklia branded layout (header + footer).
  */
 export function wrapInLayout(content: string, previewText: string): string {
   return `
@@ -19,7 +19,7 @@ export function wrapInLayout(content: string, previewText: string): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-  <title>Sidely</title>
+  <title>Booklia</title>
   <!--[if mso]>
   <noscript>
     <xml>
@@ -46,7 +46,7 @@ export function wrapInLayout(content: string, previewText: string): string {
           <tr>
             <td align="center" style="padding:24px 0 16px;">
               <span style="font-size:28px;font-weight:700;color:${BRAND_COLOR};letter-spacing:-0.5px;">
-                Sidely
+                Booklia
               </span>
             </td>
           </tr>
@@ -62,10 +62,10 @@ export function wrapInLayout(content: string, previewText: string): string {
           <tr>
             <td align="center" style="padding:24px 0 0;">
               <p style="margin:0 0 8px;font-size:13px;color:${TEXT_MUTED};">
-                Cet email a été envoyé automatiquement par Sidely.
+                Cet email a été envoyé automatiquement par Booklia.
               </p>
               <p style="margin:0;font-size:13px;color:${TEXT_MUTED};">
-                &copy; ${new Date().getFullYear()} Sidely. Tous droits réservés.
+                &copy; ${new Date().getFullYear()} Booklia. Tous droits réservés.
               </p>
             </td>
           </tr>

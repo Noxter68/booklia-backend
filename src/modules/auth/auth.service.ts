@@ -203,7 +203,7 @@ export class AuthService {
     if (isAdminInvite) {
       this.emailService.sendAdminInvitation(email, {
         userName: name,
-        appName: 'Sidely',
+        appName: 'Booklia',
         verificationUrl,
       });
     } else {

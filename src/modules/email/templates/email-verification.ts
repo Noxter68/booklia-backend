@@ -25,12 +25,12 @@ export function buildEmailVerificationEmail(data: EmailVerificationData): {
     ${ctaButton('Vérifier mon email', data.verificationUrl)}
 
     <p style="margin:24px 0 0;font-size:13px;color:#636E72;line-height:1.5;">
-      Si vous n'avez pas créé de compte sur Sidely, vous pouvez ignorer cet email.
+      Si vous n'avez pas créé de compte sur Booklia, vous pouvez ignorer cet email.
     </p>
   `;
 
   return {
-    subject: 'Vérifiez votre adresse email — Sidely',
-    html: wrapInLayout(content, 'Confirmez votre adresse email pour activer votre compte Sidely.'),
+    subject: 'Vérifiez votre adresse email — Booklia',
+    html: wrapInLayout(content, 'Confirmez votre adresse email pour activer votre compte Booklia.'),
   };
 }

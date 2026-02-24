@@ -34,7 +34,7 @@ export class EmailService {
   constructor(private config: ConfigService) {
     this.resend = new Resend(config.get<string>('RESEND_API_KEY'));
     this.fromEmail =
-      config.get<string>('RESEND_FROM_EMAIL') || 'Sidely <noreply@sidely.fr>';
+      config.get<string>('RESEND_FROM_EMAIL') || 'Booklia <noreply@booklia.fr>';
   }
 
   /**

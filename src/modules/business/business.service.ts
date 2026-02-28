@@ -28,6 +28,13 @@ export class BusinessService {
     private cacheService: CacheService,
   ) {}
 
+  private async invalidateBusinessCache(slug: string) {
+    await Promise.all([
+      this.cacheService.del(CacheService.businessKey(slug)),
+      this.cacheService.delByPattern('search:business:*'),
+    ]);
+  }
+
   private generateSlug(name: string): string {
     return name
       .toLowerCase()
@@ -295,11 +302,7 @@ export class BusinessService {
       },
     });
 
-    // Invalidate caches
-    await Promise.all([
-      this.cacheService.del(CacheService.businessKey(business.slug)),
-      this.cacheService.delByPattern('search:business:*'),
-    ]);
+    await this.invalidateBusinessCache(business.slug);
 
     return updated;
   }
@@ -542,7 +545,7 @@ export class BusinessService {
       throw new NotFoundException('Business non trouvé');
     }
 
-    return this.prisma.businessService.create({
+    const service = await this.prisma.businessService.create({
       data: {
         ...dto,
         businessId: business.id,
@@ -551,6 +554,9 @@ export class BusinessService {
         category: true,
       },
     });
+
+    await this.invalidateBusinessCache(business.slug);
+    return service;
   }
 
   async updateService(
@@ -574,13 +580,16 @@ export class BusinessService {
       throw new ForbiddenException('Accès refusé');
     }
 
-    return this.prisma.businessService.update({
+    const updated = await this.prisma.businessService.update({
       where: { id: serviceId },
       data: dto,
       include: {
         category: true,
       },
     });
+
+    await this.invalidateBusinessCache(business.slug);
+    return updated;
   }
 
   async deleteService(userId: string, serviceId: string) {
@@ -604,6 +613,7 @@ export class BusinessService {
       where: { id: serviceId },
     });
 
+    await this.invalidateBusinessCache(business.slug);
     return { success: true };
   }
 
@@ -675,6 +685,7 @@ export class BusinessService {
       ),
     ]);
 
+    await this.invalidateBusinessCache(business.slug);
     return this.getHours(business.id);
   }
 
@@ -709,13 +720,16 @@ export class BusinessService {
       _max: { sortOrder: true },
     });
 
-    return this.prisma.businessCategory.create({
+    const category = await this.prisma.businessCategory.create({
       data: {
         businessId: business.id,
         name: dto.name,
         sortOrder: dto.sortOrder ?? (maxSort._max.sortOrder ?? 0) + 1,
       },
     });
+
+    await this.invalidateBusinessCache(business.slug);
+    return category;
   }
 
   async updateCategory(
@@ -739,10 +753,13 @@ export class BusinessService {
       throw new ForbiddenException('Accès refusé');
     }
 
-    return this.prisma.businessCategory.update({
+    const updated = await this.prisma.businessCategory.update({
       where: { id: categoryId },
       data: dto,
     });
+
+    await this.invalidateBusinessCache(business.slug);
+    return updated;
   }
 
   async deleteCategory(userId: string, categoryId: string) {
@@ -772,6 +789,7 @@ export class BusinessService {
       where: { id: categoryId },
     });
 
+    await this.invalidateBusinessCache(business.slug);
     return { success: true };
   }
 
@@ -792,13 +810,16 @@ export class BusinessService {
       throw new NotFoundException('Business non trouvé');
     }
 
-    return this.prisma.business.update({
+    const updated = await this.prisma.business.update({
       where: { id: business.id },
       data: {
         isOnVacation,
         vacationMessage: isOnVacation ? vacationMessage : null,
       },
     });
+
+    await this.invalidateBusinessCache(business.slug);
+    return updated;
   }
 
   // ============================================
@@ -852,13 +873,16 @@ export class BusinessService {
       _max: { sortOrder: true },
     });
 
-    return this.prisma.businessImage.create({
+    const image = await this.prisma.businessImage.create({
       data: {
         businessId: business.id,
         url,
         sortOrder: (maxSort._max.sortOrder ?? 0) + 1,
       },
     });
+
+    await this.invalidateBusinessCache(business.slug);
+    return image;
   }
 
   async deleteImage(userId: string, imageId: string) {
@@ -888,6 +912,7 @@ export class BusinessService {
       where: { id: imageId },
     });
 
+    await this.invalidateBusinessCache(business.slug);
     return { success: true };
   }
 
@@ -910,6 +935,7 @@ export class BusinessService {
       ),
     );
 
+    await this.invalidateBusinessCache(business.slug);
     return this.getImages(business.id);
   }
 

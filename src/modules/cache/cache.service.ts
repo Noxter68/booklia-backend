@@ -14,6 +14,7 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     CATEGORIES: 300, // 5 minutes for categories
     BUSINESS_PAGE: 120, // 2 minutes for business pages
     SERVICES: 180, // 3 minutes for services list
+    CLIENT_STATS: 120, // 2 minutes for client stats
   };
 
   constructor(private configService: ConfigService) {}
@@ -145,6 +146,13 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
    */
   static categoriesKey(): string {
     return 'categories:all';
+  }
+
+  /**
+   * Helper to generate cache key for client stats
+   */
+  static clientStatsKey(businessId: string, userId: string): string {
+    return `client-stats:${businessId}:${userId}`;
   }
 
   /**

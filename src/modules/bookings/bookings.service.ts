@@ -11,6 +11,8 @@ import { CreateBookingDto } from './dto/create-booking.dto';
 import { BookingStatus } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
+import { ClientsService } from '../clients/clients.service';
+import { CacheService } from '../cache/cache.service';
 
 @Injectable()
 export class BookingsService {
@@ -19,6 +21,9 @@ export class BookingsService {
     @Inject(forwardRef(() => NotificationsService))
     private notificationsService: NotificationsService,
     private websocketGateway: WebsocketGateway,
+    @Inject(forwardRef(() => ClientsService))
+    private clientsService: ClientsService,
+    private cacheService: CacheService,
   ) {}
 
   async create(userId: string, dto: CreateBookingDto) {
@@ -47,6 +52,17 @@ export class BookingsService {
 
     if (employee.businessId !== businessService.businessId) {
       throw new BadRequestException('Employee does not belong to this business');
+    }
+
+    // Check if client is blocked by this business
+    const isBlocked = await this.clientsService.isClientBlocked(
+      businessService.businessId,
+      userId,
+    );
+    if (isBlocked) {
+      throw new ForbiddenException(
+        'Vous ne pouvez pas effectuer de réservation auprès de ce professionnel',
+      );
     }
 
     // Calculate scheduledEndAt based on service duration
@@ -121,6 +137,11 @@ export class BookingsService {
       );
     }
 
+    // Auto-create client record (fire-and-forget)
+    this.clientsService
+      .ensureClient(businessService.businessId, userId)
+      .catch(() => {});
+
     return booking;
   }
 
@@ -164,13 +185,23 @@ export class BookingsService {
       throw new BadRequestException('Booking must be ACCEPTED to complete');
     }
 
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: {
         status: BookingStatus.COMPLETED,
         completedAt: new Date(),
       },
     });
+
+    // Invalidate client stats cache
+    const businessId = booking.businessService?.businessId;
+    if (businessId) {
+      this.cacheService
+        .del(CacheService.clientStatsKey(businessId, booking.requesterId))
+        .catch(() => {});
+    }
+
+    return updated;
   }
 
   /**
@@ -251,8 +282,16 @@ export class BookingsService {
 
     const updated = await this.prisma.booking.update({
       where: { id: bookingId },
-      data: { status: BookingStatus.CANCELED },
+      data: { status: BookingStatus.CANCELED, canceledById: userId },
     });
+
+    // Invalidate client stats cache
+    const businessId = booking.businessService?.businessId;
+    if (businessId) {
+      this.cacheService
+        .del(CacheService.clientStatsKey(businessId, booking.requesterId))
+        .catch(() => {});
+    }
 
     // Determine who is canceling and notify the other party
     const isRequester = booking.requesterId === userId;

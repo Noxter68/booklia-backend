@@ -38,6 +38,10 @@ model User {
   // Business relations
   ownedBusiness     Business?
   employeeAt        Employee?
+
+  // Client management
+  businessClients   BusinessClient[]
+  bookingsCanceled  Booking[] @relation("BookingCanceler")
 }
 
 model Session {
@@ -143,6 +147,7 @@ model Business {
   categories BusinessCategory[]
   images     BusinessImage[]
   promotions BusinessPromotion[]
+  clients    BusinessClient[]
 
   @@index([city])
   @@index([categoryId])
@@ -180,6 +185,27 @@ model BusinessImage {
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId])
+}
+
+model BusinessClient {
+  id         String   @id @default(cuid())
+  businessId String
+  userId     String
+  isBlocked  Boolean  @default(false)
+  notes      String?
+  phone      String?
+  address    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@index([businessId])
+  @@index([userId])
 }
 
 model Employee {
@@ -349,6 +375,9 @@ model Booking {
   // Rejection message (when provider declines)
   rejectionMessage String?
 
+  // Who canceled (null if not canceled)
+  canceledById String?
+
   // Email reminder tracking
   reminderSentAt DateTime?
 
@@ -360,6 +389,7 @@ model Booking {
   employee        Employee        @relation(fields: [employeeId], references: [id])
   requester       User            @relation("BookingRequester", fields: [requesterId], references: [id])
   provider        User            @relation("BookingProvider", fields: [providerId], references: [id])
+  canceledBy      User?           @relation("BookingCanceler", fields: [canceledById], references: [id])
   reviews         Review[]
 
   @@index([businessServiceId])

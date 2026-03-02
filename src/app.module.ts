@@ -16,6 +16,7 @@ import { WebsocketModule } from './modules/websocket/websocket.module';
 import { GeocodingModule } from './modules/geocoding/geocoding.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { EmailModule } from './modules/email/email.module';
+import { ClientsModule } from './modules/clients/clients.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { EmailModule } from './modules/email/email.module';
     ReviewsModule,
     CategoriesModule,
     StripeModule,
+    ClientsModule,
     BusinessModule,
     EmployeesModule,
     UploadModule,

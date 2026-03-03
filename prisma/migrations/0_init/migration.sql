@@ -1,6 +1,3 @@
-warn The configuration property `package.json#prisma` is deprecated and will be removed in Prisma 7. Please migrate to a Prisma config file (e.g., `prisma.config.ts`).
-For more information, see: https://pris.ly/prisma-config
-
 -- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
@@ -85,6 +82,7 @@ CREATE TABLE "Business" (
     "name" TEXT NOT NULL,
     "slug" TEXT NOT NULL,
     "description" TEXT,
+    "presentation" TEXT,
     "logoUrl" TEXT,
     "coverUrl" TEXT,
     "categoryId" TEXT,
@@ -107,10 +105,27 @@ CREATE TABLE "Business" (
     "isEarlyAdopter" BOOLEAN NOT NULL DEFAULT false,
     "isOnVacation" BOOLEAN NOT NULL DEFAULT false,
     "vacationMessage" TEXT,
+    "autoAcceptBookings" BOOLEAN NOT NULL DEFAULT false,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Business_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "BusinessPromotion" (
+    "id" TEXT NOT NULL,
+    "businessId" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "description" TEXT,
+    "imageUrl" TEXT,
+    "startDate" TIMESTAMP(3) NOT NULL,
+    "endDate" TIMESTAMP(3) NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "BusinessPromotion_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -122,6 +137,21 @@ CREATE TABLE "BusinessImage" (
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "BusinessImage_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "BusinessClient" (
+    "id" TEXT NOT NULL,
+    "businessId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "isBlocked" BOOLEAN NOT NULL DEFAULT false,
+    "notes" TEXT,
+    "phone" TEXT,
+    "address" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "BusinessClient_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -229,6 +259,7 @@ CREATE TABLE "Booking" (
     "completedAt" TIMESTAMP(3),
     "notes" TEXT,
     "rejectionMessage" TEXT,
+    "canceledById" TEXT,
     "reminderSentAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -288,7 +319,22 @@ CREATE INDEX "Business_city_idx" ON "Business"("city");
 CREATE INDEX "Business_categoryId_idx" ON "Business"("categoryId");
 
 -- CreateIndex
+CREATE INDEX "BusinessPromotion_businessId_idx" ON "BusinessPromotion"("businessId");
+
+-- CreateIndex
+CREATE INDEX "BusinessPromotion_startDate_endDate_idx" ON "BusinessPromotion"("startDate", "endDate");
+
+-- CreateIndex
 CREATE INDEX "BusinessImage_businessId_idx" ON "BusinessImage"("businessId");
+
+-- CreateIndex
+CREATE INDEX "BusinessClient_businessId_idx" ON "BusinessClient"("businessId");
+
+-- CreateIndex
+CREATE INDEX "BusinessClient_userId_idx" ON "BusinessClient"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "BusinessClient_businessId_userId_key" ON "BusinessClient"("businessId", "userId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Employee_userId_key" ON "Employee"("userId");
@@ -366,7 +412,16 @@ ALTER TABLE "Business" ADD CONSTRAINT "Business_categoryId_fkey" FOREIGN KEY ("c
 ALTER TABLE "Business" ADD CONSTRAINT "Business_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "BusinessPromotion" ADD CONSTRAINT "BusinessPromotion_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "BusinessImage" ADD CONSTRAINT "BusinessImage_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "BusinessClient" ADD CONSTRAINT "BusinessClient_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "BusinessClient" ADD CONSTRAINT "BusinessClient_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Employee" ADD CONSTRAINT "Employee_businessId_fkey" FOREIGN KEY ("businessId") REFERENCES "Business"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -412,6 +467,9 @@ ALTER TABLE "Booking" ADD CONSTRAINT "Booking_requesterId_fkey" FOREIGN KEY ("re
 
 -- AddForeignKey
 ALTER TABLE "Booking" ADD CONSTRAINT "Booking_providerId_fkey" FOREIGN KEY ("providerId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Booking" ADD CONSTRAINT "Booking_canceledById_fkey" FOREIGN KEY ("canceledById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

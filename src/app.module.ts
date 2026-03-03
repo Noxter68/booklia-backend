@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { AppController } from './app.controller';
 import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from './prisma/prisma.module';
 import { CacheModule } from './modules/cache/cache.module';
@@ -19,6 +20,7 @@ import { EmailModule } from './modules/email/email.module';
 import { ClientsModule } from './modules/clients/clients.module';
 
 @Module({
+  controllers: [AppController],
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,

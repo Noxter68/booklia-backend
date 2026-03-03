@@ -47,6 +47,9 @@
     "socket.io": "^4.8.3",
     "stripe": "^20.3.0"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "@nestjs/cli": "^10.4.9",
     "@types/bcrypt": "^6.0.0",

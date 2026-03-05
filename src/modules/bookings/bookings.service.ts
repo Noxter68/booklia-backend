@@ -121,6 +121,15 @@ export class BookingsService {
         booking.id,
       );
 
+      // Also notify the business owner about the new auto-accepted booking
+      const requesterName = booking.requester.name || 'Quelqu\'un';
+      await this.notificationsService.notifyNewBooking(
+        businessService.business.ownerId,
+        requesterName,
+        serviceTitle,
+        booking.id,
+      );
+
       // Send real-time status update to requester
       this.websocketGateway.sendBookingStatusUpdate(userId, {
         ...booking,

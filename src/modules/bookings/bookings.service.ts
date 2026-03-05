@@ -474,6 +474,41 @@ export class BookingsService {
     return booking;
   }
 
+  /**
+   * Revenue stats: daily aggregation of completed bookings over a date range.
+   * Returns { date, revenue, count } for each day with at least one completed booking.
+   */
+  async getRevenueStats(userId: string, from: Date, to: Date) {
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        providerId: userId,
+        status: BookingStatus.COMPLETED,
+        scheduledAt: { gte: from, lte: to },
+      },
+      select: {
+        scheduledAt: true,
+        agreedPriceCents: true,
+      },
+      orderBy: { scheduledAt: 'asc' },
+    });
+
+    // Group by day
+    const dayMap = new Map<string, { revenue: number; count: number }>();
+    for (const b of bookings) {
+      const day = b.scheduledAt!.toISOString().slice(0, 10);
+      const existing = dayMap.get(day) || { revenue: 0, count: 0 };
+      existing.revenue += b.agreedPriceCents || 0;
+      existing.count += 1;
+      dayMap.set(day, existing);
+    }
+
+    return Array.from(dayMap.entries()).map(([date, stats]) => ({
+      date,
+      revenue: stats.revenue,
+      count: stats.count,
+    }));
+  }
+
   private assertUserInBooking(userId: string, booking: any) {
     if (booking.requesterId !== userId && booking.providerId !== userId) {
       throw new ForbiddenException('You are not part of this booking');

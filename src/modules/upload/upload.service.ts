@@ -63,6 +63,29 @@ export class UploadService {
     }
   }
 
+  async uploadBuffer(
+    buffer: Buffer,
+    key: string,
+    contentType: string,
+  ): Promise<{ url: string; key: string }> {
+    try {
+      await this.s3Client.send(
+        new PutObjectCommand({
+          Bucket: this.bucketName,
+          Key: key,
+          Body: buffer,
+          ContentType: contentType,
+        }),
+      );
+
+      const url = `${this.publicUrl}/${key}`;
+      return { url, key };
+    } catch (error) {
+      console.error('Upload buffer error:', error);
+      throw new BadRequestException('Failed to upload file');
+    }
+  }
+
   async deleteFile(key: string): Promise<void> {
     try {
       await this.s3Client.send(

@@ -249,6 +249,42 @@ export class ClientsService {
   }
 
   /**
+   * Client growth stats: daily count of new clients over a date range.
+   * Returns baseCount (clients before `from`) + daily new client counts.
+   */
+  async getClientGrowthStats(businessId: string, from: Date, to: Date) {
+    const [baseCount, newClients] = await Promise.all([
+      this.prisma.businessClient.count({
+        where: {
+          businessId,
+          createdAt: { lt: from },
+        },
+      }),
+      this.prisma.businessClient.findMany({
+        where: {
+          businessId,
+          createdAt: { gte: from, lte: to },
+        },
+        select: { createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+    ]);
+
+    const dayMap = new Map<string, number>();
+    for (const c of newClients) {
+      const day = c.createdAt.toISOString().slice(0, 10);
+      dayMap.set(day, (dayMap.get(day) || 0) + 1);
+    }
+
+    const daily = Array.from(dayMap.entries()).map(([date, count]) => ({
+      date,
+      count,
+    }));
+
+    return { baseCount, daily };
+  }
+
+  /**
    * Update client metadata (block, notes, phone, address).
    */
   async updateClient(

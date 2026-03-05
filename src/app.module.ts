@@ -19,6 +19,9 @@ import { AdminModule } from './modules/admin/admin.module';
 import { EmailModule } from './modules/email/email.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
+import { BookingNotesModule } from './modules/booking-notes/booking-notes.module';
+import { BillingModule } from './modules/billing/billing.module';
+import { InvoicesModule } from './modules/invoices/invoices.module';
 
 @Module({
   controllers: [AppController],
@@ -44,6 +47,9 @@ import { CalendarModule } from './modules/calendar/calendar.module';
     AdminModule,
     EmailModule,
     CalendarModule,
+    BookingNotesModule,
+    BillingModule,
+    InvoicesModule,
   ],
 })
 export class AppModule {}

@@ -42,6 +42,14 @@ model User {
   // Client management
   businessClients   BusinessClient[]
   bookingsCanceled  Booking[] @relation("BookingCanceler")
+
+  // Booking notes
+  bookingNotesAsClient  BookingNote[] @relation("BookingNoteClient")
+  bookingNotesCreated   BookingNote[] @relation("BookingNoteCreator")
+
+  // Invoicing
+  invoicesAsClient  Invoice[] @relation("InvoiceClient")
+  invoicesCreated   Invoice[] @relation("InvoiceCreator")
 }
 
 model Session {
@@ -148,6 +156,11 @@ model Business {
   images     BusinessImage[]
   promotions BusinessPromotion[]
   clients    BusinessClient[]
+
+  // Booking notes & Invoicing
+  bookingNotes    BookingNote[]
+  billingSettings BusinessBillingSettings?
+  invoices        Invoice[]
 
   @@index([city])
   @@index([categoryId])
@@ -395,6 +408,8 @@ model Booking {
   provider        User            @relation("BookingProvider", fields: [providerId], references: [id])
   canceledBy      User?           @relation("BookingCanceler", fields: [canceledById], references: [id])
   reviews         Review[]
+  bookingNote     BookingNote?
+  invoice         Invoice?
 
   @@index([businessServiceId])
   @@index([employeeId])
@@ -505,4 +520,131 @@ enum NotificationType {
   BOOKING_CANCELED      // Booking was canceled
   BOOKING_COMPLETED     // Booking was completed
   REVIEW_RECEIVED       // Someone left you a review
+}
+
+enum NoteVisibility {
+  PRIVATE_BUSINESS
+}
+
+enum VatMode {
+  FRANCHISE_293B
+  STANDARD
+}
+
+enum InvoiceStatus {
+  DRAFT
+  FINALIZED
+  CANCELLED
+}
+
+enum InvoiceLineKind {
+  SERVICE
+  PRODUCT
+  OTHER
+}
+
+// ============================================
+// BOOKING NOTES
+// ============================================
+
+model BookingNote {
+  id              String         @id @default(cuid())
+  businessId      String
+  clientId        String         // userId du client (requester)
+  bookingId       String         @unique
+  createdByUserId String
+  visibility      NoteVisibility @default(PRIVATE_BUSINESS)
+  content         String
+  structured      Json?
+  tags            String[]       @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business  Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  client    User     @relation("BookingNoteClient", fields: [clientId], references: [id])
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("BookingNoteCreator", fields: [createdByUserId], references: [id])
+
+  @@index([businessId, clientId, createdAt])
+}
+
+// ============================================
+// BILLING & INVOICING
+// ============================================
+
+model BusinessBillingSettings {
+  id                  String  @id @default(cuid())
+  businessId          String  @unique
+  legalName           String
+  addressLine1        String
+  addressLine2        String?
+  postalCode          String
+  city                String
+  country             String  @default("FR")
+  siret               String
+  vatNumber           String?
+  vatMode             VatMode @default(FRANCHISE_293B)
+  invoicePrefix       String
+  nextInvoiceSequence Int     @default(1)
+  logoKey             String?
+  paymentTerms        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  businessId      String
+  clientId        String?
+  bookingId       String?       @unique
+  status          InvoiceStatus @default(DRAFT)
+  invoiceNumber   String?
+  issueDate       DateTime?
+  serviceDate     DateTime?
+  currency        String        @default("EUR")
+  totalHTCents    Int           @default(0)
+  totalVATCents   Int           @default(0)
+  totalTTCCents   Int           @default(0)
+  vatMode         VatMode       @default(FRANCHISE_293B)
+  snapshot        Json?
+  pdfKey          String?
+  createdByUserId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business  Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  client    User?         @relation("InvoiceClient", fields: [clientId], references: [id])
+  booking   Booking?      @relation(fields: [bookingId], references: [id])
+  createdBy User          @relation("InvoiceCreator", fields: [createdByUserId], references: [id])
+  lines     InvoiceLine[]
+
+  @@unique([businessId, invoiceNumber])
+  @@index([businessId, createdAt])
+}
+
+model InvoiceLine {
+  id               String          @id @default(cuid())
+  invoiceId        String
+  kind             InvoiceLineKind @default(SERVICE)
+  label            String
+  quantity         Int             @default(1)
+  unitPriceHTCents Int
+  vatRate          Float           @default(0)
+  totalHTCents     Int             @default(0)
+  totalVATCents    Int             @default(0)
+  totalTTCCents    Int             @default(0)
+  sortOrder        Int             @default(0)
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
 }

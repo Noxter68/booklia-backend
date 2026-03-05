@@ -96,7 +96,7 @@ export class BookingNotesService {
       throw new NotFoundException('Réservation non trouvée');
     }
 
-    if (booking.businessService.businessId !== businessId) {
+    if (booking.businessService?.businessId !== businessId) {
       throw new ForbiddenException('Accès refusé');
     }
 

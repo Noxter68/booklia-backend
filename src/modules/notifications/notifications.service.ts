@@ -152,6 +152,7 @@ export class NotificationsService {
       const booking = await this.getBookingWithDetails(bookingId);
       if (!booking?.requester.email) return;
 
+      if (!booking.businessService) return;
       await this.emailService.sendBookingAccepted(booking.requester.email, {
         clientName: booking.requester.name || 'Client',
         businessName: booking.businessService.business.name,
@@ -178,6 +179,7 @@ export class NotificationsService {
       const booking = await this.getBookingWithDetails(bookingId);
       if (!booking?.requester.email) return;
 
+      if (!booking.businessService) return;
       await this.emailService.sendBookingCanceled(booking.requester.email, {
         clientName: booking.requester.name || 'Client',
         businessName: booking.businessService.business.name,

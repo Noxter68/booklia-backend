@@ -138,7 +138,7 @@ export class ClientsService {
       .reduce((sum, b) => sum + (b.agreedPriceCents || 0), 0);
 
     const servicesUsed = [
-      ...new Set(bookings.map((b) => b.businessService.name)),
+      ...new Set(bookings.map((b) => b.businessService!.name)),
     ];
 
     // Only count resolved bookings (COMPLETED + CANCELED) for trust calculation

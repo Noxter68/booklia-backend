@@ -359,10 +359,14 @@ model Booking {
   providerId  String
 
   // Business booking
-  businessServiceId String
+  businessServiceId String?
   employeeId        String
 
   status BookingStatus @default(PENDING)
+
+  // Calendar fields
+  kind        CalendarEntryKind @default(APPOINTMENT)
+  blockReason BlockReason?
 
   agreedPriceCents Int?
   scheduledAt      DateTime?
@@ -385,8 +389,8 @@ model Booking {
   updatedAt DateTime @updatedAt
 
   // Relations
-  businessService BusinessService @relation(fields: [businessServiceId], references: [id], onDelete: Cascade)
-  employee        Employee        @relation(fields: [employeeId], references: [id])
+  businessService BusinessService? @relation(fields: [businessServiceId], references: [id], onDelete: Cascade)
+  employee        Employee         @relation(fields: [employeeId], references: [id])
   requester       User            @relation("BookingRequester", fields: [requesterId], references: [id])
   provider        User            @relation("BookingProvider", fields: [providerId], references: [id])
   canceledBy      User?           @relation("BookingCanceler", fields: [canceledById], references: [id])
@@ -398,6 +402,7 @@ model Booking {
   @@index([providerId])
   @@index([status])
   @@index([scheduledAt])
+  @@index([employeeId, scheduledAt])
 }
 
 // ============================================
@@ -468,6 +473,19 @@ enum BookingStatus {
   REJECTED
   COMPLETED
   CANCELED
+  NO_SHOW
+}
+
+enum CalendarEntryKind {
+  APPOINTMENT
+  BLOCK
+}
+
+enum BlockReason {
+  BREAK
+  UNAVAILABLE
+  PERSONAL
+  CLOSED
 }
 
 enum ReviewType {

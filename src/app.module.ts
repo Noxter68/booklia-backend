@@ -18,6 +18,7 @@ import { GeocodingModule } from './modules/geocoding/geocoding.module';
 import { AdminModule } from './modules/admin/admin.module';
 import { EmailModule } from './modules/email/email.module';
 import { ClientsModule } from './modules/clients/clients.module';
+import { CalendarModule } from './modules/calendar/calendar.module';
 
 @Module({
   controllers: [AppController],
@@ -42,6 +43,7 @@ import { ClientsModule } from './modules/clients/clients.module';
     GeocodingModule,
     AdminModule,
     EmailModule,
+    CalendarModule,
   ],
 })
 export class AppModule {}

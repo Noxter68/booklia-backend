@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
-import { BookingStatus } from '@prisma/client';
+import { BookingStatus, CalendarEntryKind } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
 import { ClientsService } from '../clients/clients.service';
@@ -222,6 +222,7 @@ export class BookingsService {
     const expiredBookings = await this.prisma.booking.findMany({
       where: {
         status: BookingStatus.ACCEPTED,
+        kind: CalendarEntryKind.APPOINTMENT,
         scheduledAt: {
           lt: now,
         },
@@ -256,6 +257,7 @@ export class BookingsService {
     const expiredBookings = await this.prisma.booking.findMany({
       where: {
         status: BookingStatus.ACCEPTED,
+        kind: CalendarEntryKind.APPOINTMENT,
         scheduledAt: {
           lt: now,
         },

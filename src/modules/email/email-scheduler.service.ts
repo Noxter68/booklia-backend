@@ -68,7 +68,7 @@ export class EmailSchedulerService {
 
     for (const booking of bookings) {
       const clientEmail = booking.requester.email;
-      if (!clientEmail) continue;
+      if (!clientEmail || !booking.businessService) continue;
 
       await this.emailService.sendBookingReminder(clientEmail, {
         clientName: booking.requester.name || 'Client',

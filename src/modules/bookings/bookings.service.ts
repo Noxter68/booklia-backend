@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
-import { BookingStatus } from '@prisma/client';
+import { BookingStatus, CalendarEntryKind } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
 import { ClientsService } from '../clients/clients.service';
@@ -222,6 +222,7 @@ export class BookingsService {
     const expiredBookings = await this.prisma.booking.findMany({
       where: {
         status: BookingStatus.ACCEPTED,
+        kind: CalendarEntryKind.APPOINTMENT,
         scheduledAt: {
           lt: now,
         },
@@ -248,34 +249,24 @@ export class BookingsService {
   }
 
   /**
-   * Lazy auto-complete: check and complete expired bookings for a specific user
+   * Lazy auto-complete: mark expired bookings as COMPLETED for a specific user.
+   * Uses updateMany (single SQL query) instead of looping individual updates.
    */
   private async autoCompleteExpiredForUser(userId: string) {
     const now = new Date();
 
-    const expiredBookings = await this.prisma.booking.findMany({
+    await this.prisma.booking.updateMany({
       where: {
-        status: BookingStatus.ACCEPTED,
-        scheduledAt: {
-          lt: now,
-        },
+        status: { in: [BookingStatus.ACCEPTED, BookingStatus.PENDING] },
+        kind: CalendarEntryKind.APPOINTMENT,
+        scheduledEndAt: { lt: now },
         OR: [{ requesterId: userId }, { providerId: userId }],
       },
+      data: {
+        status: BookingStatus.COMPLETED,
+        completedAt: now,
+      },
     });
-
-    for (const booking of expiredBookings) {
-      try {
-        await this.prisma.booking.update({
-          where: { id: booking.id },
-          data: {
-            status: BookingStatus.COMPLETED,
-            completedAt: now,
-          },
-        });
-      } catch (error) {
-        console.error(`Failed to auto-complete booking ${booking.id}:`, error);
-      }
-    }
   }
 
   async cancel(userId: string, bookingId: string) {
@@ -470,6 +461,41 @@ export class BookingsService {
       throw new NotFoundException('Booking not found');
     }
     return booking;
+  }
+
+  /**
+   * Revenue stats: daily aggregation of completed bookings over a date range.
+   * Returns { date, revenue, count } for each day with at least one completed booking.
+   */
+  async getRevenueStats(userId: string, from: Date, to: Date) {
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        providerId: userId,
+        status: BookingStatus.COMPLETED,
+        scheduledAt: { gte: from, lte: to },
+      },
+      select: {
+        scheduledAt: true,
+        agreedPriceCents: true,
+      },
+      orderBy: { scheduledAt: 'asc' },
+    });
+
+    // Group by day
+    const dayMap = new Map<string, { revenue: number; count: number }>();
+    for (const b of bookings) {
+      const day = b.scheduledAt!.toISOString().slice(0, 10);
+      const existing = dayMap.get(day) || { revenue: 0, count: 0 };
+      existing.revenue += b.agreedPriceCents || 0;
+      existing.count += 1;
+      dayMap.set(day, existing);
+    }
+
+    return Array.from(dayMap.entries()).map(([date, stats]) => ({
+      date,
+      revenue: stats.revenue,
+      count: stats.count,
+    }));
   }
 
   private assertUserInBooking(userId: string, booking: any) {

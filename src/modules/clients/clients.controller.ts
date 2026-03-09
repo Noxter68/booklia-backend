@@ -39,6 +39,20 @@ export class ClientsController {
     return this.clientsService.getClientsForBusiness(businessId, search);
   }
 
+  @Get('growth-stats')
+  async growthStats(
+    @Req() req: any,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    const businessId = await this.getBusinessId(req.user.id);
+    return this.clientsService.getClientGrowthStats(
+      businessId,
+      new Date(from),
+      new Date(to),
+    );
+  }
+
   @Get(':clientId')
   async getClientDetail(
     @Req() req: any,

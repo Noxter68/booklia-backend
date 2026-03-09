@@ -123,6 +123,12 @@ export class WebsocketGateway
     this.logger.log(`Sent booking status update to user ${userId}: ${booking.id} -> ${booking.status}`);
   }
 
+  // Send calendar update to a business owner (triggers refetch on all connected tabs)
+  sendCalendarUpdate(userId: string) {
+    this.server.to(`user:${userId}`).emit('calendar:update');
+    this.logger.log(`Sent calendar:update to user ${userId}`);
+  }
+
   // Join a booking room (for real-time comments)
   @SubscribeMessage('booking:join')
   handleJoinBooking(client: AuthenticatedSocket, bookingId: string) {

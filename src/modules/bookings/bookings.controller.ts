@@ -58,6 +58,19 @@ export class BookingsController {
     return this.bookingsService.findByUser(user.id, role, from, to);
   }
 
+  @Get('revenue-stats')
+  async revenueStats(
+    @CurrentUser() user: User,
+    @Query('from') from: string,
+    @Query('to') to: string,
+  ) {
+    return this.bookingsService.getRevenueStats(
+      user.id,
+      new Date(from),
+      new Date(to),
+    );
+  }
+
   @Get(':id')
   async findOne(@Param('id') id: string) {
     return this.bookingsService.findOneOrFail(id);

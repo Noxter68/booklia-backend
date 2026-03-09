@@ -124,12 +124,21 @@ export class InvoicesService {
   async findAll(
     businessId: string,
     status?: string,
+    search?: string,
     limit = 20,
     offset = 0,
   ) {
     const where: any = { businessId };
     if (status) {
       where.status = status;
+    }
+    if (search && search.trim()) {
+      const term = search.trim();
+      where.OR = [
+        { client: { name: { contains: term, mode: 'insensitive' } } },
+        { client: { email: { contains: term, mode: 'insensitive' } } },
+        { invoiceNumber: { contains: term, mode: 'insensitive' } },
+      ];
     }
 
     const [data, total] = await Promise.all([

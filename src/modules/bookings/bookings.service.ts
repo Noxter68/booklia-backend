@@ -249,35 +249,24 @@ export class BookingsService {
   }
 
   /**
-   * Lazy auto-complete: check and complete expired bookings for a specific user
+   * Lazy auto-complete: mark expired bookings as COMPLETED for a specific user.
+   * Uses updateMany (single SQL query) instead of looping individual updates.
    */
   private async autoCompleteExpiredForUser(userId: string) {
     const now = new Date();
 
-    const expiredBookings = await this.prisma.booking.findMany({
+    await this.prisma.booking.updateMany({
       where: {
-        status: BookingStatus.ACCEPTED,
+        status: { in: [BookingStatus.ACCEPTED, BookingStatus.PENDING] },
         kind: CalendarEntryKind.APPOINTMENT,
-        scheduledAt: {
-          lt: now,
-        },
+        scheduledEndAt: { lt: now },
         OR: [{ requesterId: userId }, { providerId: userId }],
       },
+      data: {
+        status: BookingStatus.COMPLETED,
+        completedAt: now,
+      },
     });
-
-    for (const booking of expiredBookings) {
-      try {
-        await this.prisma.booking.update({
-          where: { id: booking.id },
-          data: {
-            status: BookingStatus.COMPLETED,
-            completedAt: now,
-          },
-        });
-      } catch (error) {
-        console.error(`Failed to auto-complete booking ${booking.id}:`, error);
-      }
-    }
   }
 
   async cancel(userId: string, bookingId: string) {

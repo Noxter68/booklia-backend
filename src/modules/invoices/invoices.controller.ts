@@ -53,6 +53,7 @@ export class InvoicesController {
   async findAll(
     @Req() req: any,
     @Query('status') status?: string,
+    @Query('search') search?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
@@ -60,6 +61,7 @@ export class InvoicesController {
     return this.invoicesService.findAll(
       businessId,
       status,
+      search,
       limit ? parseInt(limit, 10) : 20,
       offset ? parseInt(offset, 10) : 0,
     );

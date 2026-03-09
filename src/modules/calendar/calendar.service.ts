@@ -15,6 +15,7 @@ import { GetCalendarEntriesDto } from './dto/get-calendar-entries.dto';
 import { CreateBlockDto } from './dto/create-block.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateCalendarEntryDto } from './dto/update-calendar-entry.dto';
+import { WebsocketGateway } from '../websocket/websocket.gateway';
 
 const ENTRY_INCLUDE = {
   businessService: {
@@ -36,7 +37,10 @@ const ENTRY_INCLUDE = {
 
 @Injectable()
 export class CalendarService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private wsGateway: WebsocketGateway,
+  ) {}
 
   private async getBusinessId(userId: string): Promise<string> {
     const business = await this.prisma.business.findUnique({
@@ -51,6 +55,21 @@ export class CalendarService {
     const businessId = await this.getBusinessId(userId);
     const start = new Date(dto.start);
     const end = new Date(dto.end);
+    const now = new Date();
+
+    // Auto-complete expired appointments (single SQL query, runs lazily on each fetch)
+    await this.prisma.booking.updateMany({
+      where: {
+        employee: { businessId },
+        kind: CalendarEntryKind.APPOINTMENT,
+        status: { in: [BookingStatus.ACCEPTED, BookingStatus.PENDING] },
+        scheduledEndAt: { lt: now },
+      },
+      data: {
+        status: BookingStatus.COMPLETED,
+        completedAt: now,
+      },
+    });
 
     const where: Prisma.BookingWhereInput = {
       employee: { businessId },
@@ -87,7 +106,7 @@ export class CalendarService {
 
     await this.assertNoOverlap(dto.employeeId, startAt, endAt, null);
 
-    return this.prisma.booking.create({
+    const block = await this.prisma.booking.create({
       data: {
         kind: CalendarEntryKind.BLOCK,
         status: BookingStatus.ACCEPTED,
@@ -102,6 +121,8 @@ export class CalendarService {
       },
       include: ENTRY_INCLUDE,
     });
+    this.wsGateway.sendCalendarUpdate(userId);
+    return block;
   }
 
   async createAppointment(userId: string, dto: CreateAppointmentDto) {
@@ -152,7 +173,7 @@ export class CalendarService {
       select: { autoAcceptBookings: true },
     });
 
-    return this.prisma.booking.create({
+    const appointment = await this.prisma.booking.create({
       data: {
         kind: CalendarEntryKind.APPOINTMENT,
         status: business?.autoAcceptBookings
@@ -169,6 +190,8 @@ export class CalendarService {
       },
       include: ENTRY_INCLUDE,
     });
+    this.wsGateway.sendCalendarUpdate(userId);
+    return appointment;
   }
 
   async updateEntry(userId: string, entryId: string, dto: UpdateCalendarEntryDto) {
@@ -221,11 +244,13 @@ export class CalendarService {
       }
     }
 
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id: entryId },
       data: updateData,
       include: ENTRY_INCLUDE,
     });
+    this.wsGateway.sendCalendarUpdate(userId);
+    return updated;
   }
 
   async deleteBlock(userId: string, blockId: string) {
@@ -246,6 +271,7 @@ export class CalendarService {
     }
 
     await this.prisma.booking.delete({ where: { id: blockId } });
+    this.wsGateway.sendCalendarUpdate(userId);
     return { success: true };
   }
 

@@ -5,11 +5,12 @@ import { UploadModule } from '../upload/upload.module';
 import { InvoicesController } from './invoices.controller';
 import { InvoicesService } from './invoices.service';
 import { InvoicePdfService } from './invoice-pdf.service';
+import { InvoiceBatchService } from './invoice-batch.service';
 
 @Module({
   imports: [PrismaModule, AuthModule, UploadModule],
   controllers: [InvoicesController],
-  providers: [InvoicesService, InvoicePdfService],
+  providers: [InvoicesService, InvoicePdfService, InvoiceBatchService],
   exports: [InvoicesService],
 })
 export class InvoicesModule {}

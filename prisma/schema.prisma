@@ -50,6 +50,9 @@ model User {
   // Invoicing
   invoicesAsClient  Invoice[] @relation("InvoiceClient")
   invoicesCreated   Invoice[] @relation("InvoiceCreator")
+
+  // Batch generations
+  batchGenerations  BatchGeneration[] @relation("BatchGenerationCreator")
 }
 
 model Session {
@@ -158,9 +161,10 @@ model Business {
   clients    BusinessClient[]
 
   // Booking notes & Invoicing
-  bookingNotes    BookingNote[]
-  billingSettings BusinessBillingSettings?
-  invoices        Invoice[]
+  bookingNotes     BookingNote[]
+  billingSettings  BusinessBillingSettings?
+  invoices         Invoice[]
+  batchGenerations BatchGeneration[]
 
   @@index([city])
   @@index([categoryId])
@@ -647,4 +651,35 @@ model InvoiceLine {
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
 
   @@index([invoiceId])
+}
+
+// ============================================================================
+// Batch Invoice Generation History
+// ============================================================================
+
+enum BatchGenerationStatus {
+  COMPLETED
+  FAILED
+}
+
+model BatchGeneration {
+  id             String                @id @default(cuid())
+  businessId     String
+  createdByUserId String
+  status         BatchGenerationStatus @default(COMPLETED)
+  startDate      DateTime
+  endDate        DateTime
+  invoiceCount   Int                   @default(0)
+  totalHTCents   Int                   @default(0)
+  totalVATCents  Int                   @default(0)
+  totalTTCCents  Int                   @default(0)
+  invoiceIds     String[]
+  errors         String[]
+  createdAt      DateTime              @default(now())
+
+  // Relations
+  business  Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("BatchGenerationCreator", fields: [createdByUserId], references: [id])
+
+  @@index([businessId, createdAt])
 }

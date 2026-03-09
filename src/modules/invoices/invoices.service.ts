@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { UploadService } from '../upload/upload.service';
 import {
   CreateInvoiceDto,
   AddInvoiceLineDto,
@@ -13,7 +14,10 @@ import {
 
 @Injectable()
 export class InvoicesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly uploadService: UploadService,
+  ) {}
 
   // ============================================
   // Invoice CRUD
@@ -393,9 +397,9 @@ export class InvoicesService {
     if (invoice.businessId !== businessId) {
       throw new ForbiddenException('Accès refusé');
     }
-    if (invoice.status !== 'CANCELLED') {
+    if (invoice.status !== 'DRAFT') {
       throw new BadRequestException(
-        'Seules les factures annulées peuvent être supprimées',
+        'Seuls les brouillons peuvent être supprimés. Les factures finalisées ou annulées doivent être conservées.',
       );
     }
 

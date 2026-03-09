@@ -9,16 +9,20 @@ import {
   Query,
   UseGuards,
   Req,
+  Res,
   NotFoundException,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { InvoicesService } from './invoices.service';
 import { InvoicePdfService } from './invoice-pdf.service';
+import { InvoiceBatchService } from './invoice-batch.service';
 import { UploadService } from '../upload/upload.service';
 import {
   CreateInvoiceDto,
   AddInvoiceLineDto,
   UpdateInvoiceLineDto,
 } from './dto/invoice.dto';
+import { BatchGenerateDto } from './dto/batch-invoice.dto';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -28,6 +32,7 @@ export class InvoicesController {
   constructor(
     private readonly invoicesService: InvoicesService,
     private readonly invoicePdfService: InvoicePdfService,
+    private readonly invoiceBatchService: InvoiceBatchService,
     private readonly uploadService: UploadService,
     private readonly prisma: PrismaService,
   ) {}
@@ -65,6 +70,81 @@ export class InvoicesController {
       limit ? parseInt(limit, 10) : 20,
       offset ? parseInt(offset, 10) : 0,
     );
+  }
+
+  // ============================================
+  // Batch operations (must be BEFORE :id routes)
+  // ============================================
+
+  @Post('batch/preview')
+  async batchPreview(@Req() req: any, @Body() dto: BatchGenerateDto) {
+    const businessId = await this.getBusinessId(req.user.id);
+    return this.invoiceBatchService.preview(
+      businessId,
+      new Date(dto.startDate),
+      new Date(dto.endDate),
+    );
+  }
+
+  @Post('batch/generate')
+  async batchGenerate(@Req() req: any, @Body() dto: BatchGenerateDto) {
+    const businessId = await this.getBusinessId(req.user.id);
+    return this.invoiceBatchService.generate(
+      businessId,
+      req.user.id,
+      new Date(dto.startDate),
+      new Date(dto.endDate),
+    );
+  }
+
+  @Get('batch/download')
+  async batchDownload(
+    @Req() req: any,
+    @Res() res: Response,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    const businessId = await this.getBusinessId(req.user.id);
+    const { buffer, filename } = await this.invoiceBatchService.buildZipBuffer(
+      businessId,
+      new Date(startDate),
+      new Date(endDate),
+    );
+
+    res.set({
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': String(buffer.length),
+    });
+
+    res.end(buffer);
+  }
+
+  @Get('batch/history')
+  async batchHistory(@Req() req: any) {
+    const businessId = await this.getBusinessId(req.user.id);
+    return this.invoiceBatchService.listBatchGenerations(businessId);
+  }
+
+  @Get('batch/:batchId/download')
+  async batchDownloadById(
+    @Req() req: any,
+    @Res() res: Response,
+    @Param('batchId') batchId: string,
+  ) {
+    const businessId = await this.getBusinessId(req.user.id);
+    const { buffer, filename } = await this.invoiceBatchService.buildZipBufferFromBatch(
+      businessId,
+      batchId,
+    );
+
+    res.set({
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': String(buffer.length),
+    });
+
+    res.end(buffer);
   }
 
   @Get(':id')

@@ -54,6 +54,16 @@ export class BookingsService {
       throw new BadRequestException('Employee does not belong to this business');
     }
 
+    // Business owners cannot book appointments
+    const userBusiness = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+    if (userBusiness) {
+      throw new ForbiddenException(
+        'Les comptes professionnels ne peuvent pas effectuer de réservations. Veuillez utiliser un compte client.',
+      );
+    }
+
     // Check if client is blocked by this business
     const isBlocked = await this.clientsService.isClientBlocked(
       businessService.businessId,

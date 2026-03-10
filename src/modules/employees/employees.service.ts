@@ -251,10 +251,21 @@ export class EmployeesService {
     let currentTime = startHour * 60 + startMin;
     const endTime = endHour * 60 + endMin;
 
+    // Current time to filter past slots for today
+    const now = new Date();
+    const isToday =
+      now.getFullYear() === year &&
+      now.getMonth() === month - 1 &&
+      now.getDate() === day;
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
     while (currentTime + slotDuration <= endTime) {
       const hour = Math.floor(currentTime / 60);
       const min = currentTime % 60;
       const timeStr = `${hour.toString().padStart(2, '0')}:${min.toString().padStart(2, '0')}`;
+
+      // Check if slot is in the past (for today)
+      const isPast = isToday && currentTime <= nowMinutes;
 
       // Check if slot conflicts with existing booking
       const slotStart = new Date(year, month - 1, day, hour, min, 0, 0);
@@ -275,7 +286,7 @@ export class EmployeesService {
 
       slots.push({
         time: timeStr,
-        available: !isBooked,
+        available: !isBooked && !isPast,
       });
 
       currentTime += 30; // 30-minute increments

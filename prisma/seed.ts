@@ -21,23 +21,17 @@ const categories = [
   {
     name: 'Institut de beauté',
     slug: 'institut-de-beaute',
-    children: [
-      { name: 'Soins du visage', slug: 'soins-du-visage' },
-      { name: 'Épilation', slug: 'epilation' },
-      { name: 'Maquillage', slug: 'maquillage' },
-    ],
+    children: [],
   },
   {
     name: 'Bien-être',
     slug: 'bien-etre',
     children: [
       { name: 'Massage', slug: 'massage' },
-      { name: 'Sophrologie', slug: 'sophrologie' },
-      { name: 'Réflexologie', slug: 'reflexologie' },
-      { name: 'Hypnothérapie', slug: 'hypnotherapie' },
-      { name: 'Naturopathie', slug: 'naturopathie' },
-      { name: 'Aromathérapie', slug: 'aromatherapie' },
-      { name: 'Reiki', slug: 'reiki' },
+      { name: 'Réflexologues', slug: 'reflexologues' },
+      { name: 'Sophrologues', slug: 'sophrologues' },
+      { name: 'Hypnothérapeutes', slug: 'hypnotherapeutes' },
+      { name: 'Naturopathes', slug: 'naturopathes' },
     ],
   },
 ];

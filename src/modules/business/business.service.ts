@@ -399,6 +399,10 @@ export class BusinessService {
             where: { isActive: true },
             take: 3,
           },
+          images: {
+            orderBy: { sortOrder: 'asc' },
+            take: 5,
+          },
           _count: {
             select: {
               employees: { where: { isActive: true } },
@@ -486,6 +490,10 @@ export class BusinessService {
       include: {
         owner: { select: { name: true } },
         services: { where: { isActive: true }, take: 3 },
+        images: {
+          orderBy: { sortOrder: 'asc' },
+          take: 5,
+        },
         _count: {
           select: {
             employees: { where: { isActive: true } },

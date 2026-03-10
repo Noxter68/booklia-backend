@@ -282,12 +282,12 @@ export class InvoicesService {
     });
     if (!settings) {
       throw new BadRequestException(
-        'Les paramètres de facturation doivent être configurés avant de finaliser',
+        'Veuillez configurer vos informations légales dans les paramètres de facturation avant de finaliser une facture.',
       );
     }
     if (!settings.legalName || !settings.addressLine1 || !settings.postalCode || !settings.city || !settings.siret) {
       throw new BadRequestException(
-        'Les paramètres de facturation sont incomplets (raison sociale, adresse, SIRET requis)',
+        'Vos informations légales sont incomplètes. Veuillez renseigner la raison sociale, l\'adresse et le SIRET dans les paramètres de facturation.',
       );
     }
 

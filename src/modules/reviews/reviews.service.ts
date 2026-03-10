@@ -5,12 +5,16 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { BookingStatus, ReviewType } from '@prisma/client';
 
 @Injectable()
 export class ReviewsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private notificationsService: NotificationsService,
+  ) {}
 
   async create(userId: string, dto: CreateReviewDto) {
     const booking = await this.prisma.booking.findUnique({
@@ -50,6 +54,17 @@ export class ReviewsService {
         comment: dto.comment,
       },
     });
+
+    // Notify the business owner about the new review
+    const author = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { name: true },
+    });
+    this.notificationsService.notifyReviewReceived(
+      booking.providerId,
+      author?.name || 'Un client',
+      dto.bookingId,
+    );
 
     return review;
   }

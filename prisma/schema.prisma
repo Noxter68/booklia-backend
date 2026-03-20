@@ -26,6 +26,9 @@ model User {
   // Admin flag
   isAdmin Boolean @default(false)
 
+  // Preferred locale (fr, en, pt)
+  locale String @default("fr")
+
   // Relations
   sessions          Session[]
   accounts          Account[]
@@ -357,6 +360,10 @@ model Category {
   name     String
   slug     String  @unique
   parentId String?
+
+  // Translations stored as JSON: { "en": "Hairdresser", "pt": "Cabeleireiro" }
+  // The "name" field is the default (French) name
+  translations Json?
 
   parent           Category?         @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children         Category[]        @relation("CategoryHierarchy")

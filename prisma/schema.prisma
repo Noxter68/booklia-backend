@@ -252,6 +252,7 @@ model Employee {
   availabilities EmployeeAvailability[]
   services       EmployeeService[]
   bookings       Booking[]
+  exceptions     EmployeeException[]
 
   @@index([businessId])
 }
@@ -267,7 +268,42 @@ model EmployeeAvailability {
   // Relations
   employee Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
-  @@unique([employeeId, dayOfWeek])
+  // Multiple slots per weekday allowed (e.g. 8-12 and 13-17)
+  @@index([employeeId, dayOfWeek])
+}
+
+// Overrides the weekly availability for a specific day.
+// isClosed=true means the employee is off and slots are ignored.
+// Otherwise, the child EmployeeExceptionSlot rows define the effective
+// time ranges for that date (can be zero, one, or many).
+model EmployeeException {
+  id         String   @id @default(cuid())
+  employeeId String
+  date       DateTime @db.Date // Pure date (no time) to avoid timezone drift
+  isClosed   Boolean  @default(false)
+  reason     String?  // Internal note (e.g. "Vacances", "Formation")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  employee Employee                @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  slots    EmployeeExceptionSlot[]
+
+  @@unique([employeeId, date])
+  @@index([employeeId, date])
+}
+
+// Individual time ranges attached to an exception (e.g. 08:00-12:00 + 13:00-18:00).
+model EmployeeExceptionSlot {
+  id          String @id @default(cuid())
+  exceptionId String
+  startTime   String // "09:00"
+  endTime     String // "18:00"
+
+  exception EmployeeException @relation(fields: [exceptionId], references: [id], onDelete: Cascade)
+
+  @@index([exceptionId])
 }
 
 model BusinessHours {

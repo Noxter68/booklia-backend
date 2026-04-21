@@ -15,6 +15,8 @@ import {
   CreateEmployeeDto,
   UpdateEmployeeDto,
   GetAvailableSlotsDto,
+  CreateEmployeeExceptionDto,
+  ListEmployeeExceptionsDto,
 } from './dto/employee.dto';
 import { AuthGuard } from '../auth/auth.guard';
 
@@ -38,6 +40,16 @@ export class EmployeesController {
     return this.employeesService.getAvailableSlots(dto);
   }
 
+  // Static path — must be declared before `:id` to avoid being shadowed
+  @Delete('exceptions/:exceptionId')
+  @UseGuards(AuthGuard)
+  deleteException(
+    @Req() req: any,
+    @Param('exceptionId') exceptionId: string,
+  ) {
+    return this.employeesService.deleteException(req.user.id, exceptionId);
+  }
+
   @Get(':id')
   findById(@Param('id') id: string) {
     return this.employeesService.findById(id);
@@ -57,5 +69,29 @@ export class EmployeesController {
   @UseGuards(AuthGuard)
   delete(@Req() req: any, @Param('id') id: string) {
     return this.employeesService.delete(req.user.id, id);
+  }
+
+  // ============================================
+  // EMPLOYEE EXCEPTIONS (closures / special hours)
+  // ============================================
+
+  @Get(':employeeId/exceptions')
+  @UseGuards(AuthGuard)
+  listExceptions(
+    @Req() req: any,
+    @Param('employeeId') employeeId: string,
+    @Query() dto: ListEmployeeExceptionsDto,
+  ) {
+    return this.employeesService.listExceptions(req.user.id, employeeId, dto);
+  }
+
+  @Post(':employeeId/exceptions')
+  @UseGuards(AuthGuard)
+  createException(
+    @Req() req: any,
+    @Param('employeeId') employeeId: string,
+    @Body() dto: CreateEmployeeExceptionDto,
+  ) {
+    return this.employeesService.createException(req.user.id, employeeId, dto);
   }
 }

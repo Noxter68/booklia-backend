@@ -134,3 +134,60 @@ export class GetAvailableSlotsDto {
   @IsString()
   date: string; // "2024-01-15"
 }
+
+// ============================================
+// EMPLOYEE EXCEPTIONS (closures / special hours)
+// ============================================
+
+export class TimeRangeDto {
+  @IsString()
+  startTime: string; // "09:00"
+
+  @IsString()
+  endTime: string; // "18:00"
+}
+
+/**
+ * Create an exception for a single day (date) or a range (dateFrom..dateTo inclusive).
+ * - isClosed=true → slots are ignored and the day becomes unavailable.
+ * - isClosed=false → `slots` defines one or more time ranges for that day.
+ */
+export class CreateEmployeeExceptionDto {
+  // Single-day OR range: exactly one of these modes must be used
+  @IsString()
+  @IsOptional()
+  date?: string; // "2026-04-27"
+
+  @IsString()
+  @IsOptional()
+  dateFrom?: string;
+
+  @IsString()
+  @IsOptional()
+  dateTo?: string;
+
+  @IsBoolean()
+  isClosed: boolean;
+
+  // Required when isClosed = false
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => TimeRangeDto)
+  slots?: TimeRangeDto[];
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(200)
+  reason?: string;
+}
+
+export class ListEmployeeExceptionsDto {
+  @IsString()
+  @IsOptional()
+  from?: string;
+
+  @IsString()
+  @IsOptional()
+  to?: string;
+}

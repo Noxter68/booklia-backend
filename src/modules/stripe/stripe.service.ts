@@ -23,8 +23,9 @@ export class StripeService {
       metadata: { userId },
     });
 
-    await this.prisma.user.update({
-      where: { id: userId },
+    // Find business by owner and store Stripe customer ID on the business
+    await this.prisma.business.updateMany({
+      where: { ownerId: userId },
       data: { stripeCustomerId: customer.id },
     });
 
@@ -32,17 +33,18 @@ export class StripeService {
   }
 
   async createSubscriptionCheckout(userId: string, priceId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+      include: { owner: true },
     });
 
-    if (!user) {
-      throw new BadRequestException('User not found');
+    if (!business) {
+      throw new BadRequestException('Business not found');
     }
 
-    let customerId = user.stripeCustomerId;
+    let customerId = business.stripeCustomerId;
     if (!customerId) {
-      const customer = await this.createCustomer(userId, user.email);
+      const customer = await this.createCustomer(userId, business.owner.email);
       customerId = customer.id;
     }
 
@@ -50,37 +52,8 @@ export class StripeService {
       customer: customerId,
       mode: 'subscription',
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${this.configService.get('FRONTEND_URL')}/dashboard?subscription=success`,
+      success_url: `${this.configService.get('FRONTEND_URL')}/business/dashboard?subscription=success`,
       cancel_url: `${this.configService.get('FRONTEND_URL')}/pricing?subscription=canceled`,
-    });
-
-    return { url: session.url };
-  }
-
-  async createBoostCheckout(userId: string, serviceId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-    });
-
-    if (!user) {
-      throw new BadRequestException('User not found');
-    }
-
-    let customerId = user.stripeCustomerId;
-    if (!customerId) {
-      const customer = await this.createCustomer(userId, user.email);
-      customerId = customer.id;
-    }
-
-    const boostPriceId = this.configService.get('STRIPE_BOOST_PRICE_ID');
-
-    const session = await this.stripe.checkout.sessions.create({
-      customer: customerId,
-      mode: 'payment',
-      line_items: [{ price: boostPriceId, quantity: 1 }],
-      metadata: { serviceId },
-      success_url: `${this.configService.get('FRONTEND_URL')}/dashboard?boost=success`,
-      cancel_url: `${this.configService.get('FRONTEND_URL')}/service/${serviceId}?boost=canceled`,
     });
 
     return { url: session.url };
@@ -115,21 +88,12 @@ export class StripeService {
       const customerId = session.customer as string;
       const subscriptionId = session.subscription as string;
 
-      await this.prisma.user.updateMany({
+      await this.prisma.business.updateMany({
         where: { stripeCustomerId: customerId },
         data: {
           stripeSubscriptionId: subscriptionId,
           subscriptionStatus: SubscriptionStatus.PRO,
         },
-      });
-    } else if (session.mode === 'payment' && session.metadata?.serviceId) {
-      // Boost payment
-      const boostedUntil = new Date();
-      boostedUntil.setDate(boostedUntil.getDate() + 7);
-
-      await this.prisma.service.update({
-        where: { id: session.metadata.serviceId },
-        data: { boostedUntil },
       });
     }
   }
@@ -146,24 +110,24 @@ export class StripeService {
       status = SubscriptionStatus.FREE;
     }
 
-    await this.prisma.user.updateMany({
+    await this.prisma.business.updateMany({
       where: { stripeCustomerId: customerId },
       data: { subscriptionStatus: status },
     });
   }
 
   async createBillingPortal(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+    const business = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
     });
 
-    if (!user?.stripeCustomerId) {
+    if (!business?.stripeCustomerId) {
       throw new BadRequestException('No Stripe customer found');
     }
 
     const session = await this.stripe.billingPortal.sessions.create({
-      customer: user.stripeCustomerId,
-      return_url: `${this.configService.get('FRONTEND_URL')}/dashboard`,
+      customer: business.stripeCustomerId,
+      return_url: `${this.configService.get('FRONTEND_URL')}/business/dashboard`,
     });
 
     return { url: session.url };

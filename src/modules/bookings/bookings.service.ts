@@ -3,67 +3,217 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
-import { BookingStatus, ServiceKind } from '@prisma/client';
+import { BookingStatus, CalendarEntryKind } from '@prisma/client';
+import { NotificationsService } from '../notifications/notifications.service';
+import { WebsocketGateway } from '../websocket/websocket.gateway';
+import { ClientsService } from '../clients/clients.service';
+import { CacheService } from '../cache/cache.service';
 
 @Injectable()
 export class BookingsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    @Inject(forwardRef(() => NotificationsService))
+    private notificationsService: NotificationsService,
+    private websocketGateway: WebsocketGateway,
+    @Inject(forwardRef(() => ClientsService))
+    private clientsService: ClientsService,
+    private cacheService: CacheService,
+  ) {}
 
   async create(userId: string, dto: CreateBookingDto) {
-    const service = await this.prisma.service.findUnique({
-      where: { id: dto.serviceId },
-      include: { createdBy: true },
+    // Fetch business service with its category's allowed options
+    const businessService = await this.prisma.businessService.findUnique({
+      where: { id: dto.businessServiceId },
+      include: {
+        business: {
+          include: { owner: true },
+        },
+        businessCategory: {
+          include: { options: true },
+        },
+      },
     });
 
-    if (!service) {
-      throw new NotFoundException('Service not found');
+    if (!businessService) {
+      throw new NotFoundException('Business service not found');
     }
 
-    if (service.createdByUserId === userId) {
-      throw new BadRequestException('You cannot book your own service');
+    // Fetch employee
+    const employee = await this.prisma.employee.findUnique({
+      where: { id: dto.employeeId },
+    });
+
+    if (!employee) {
+      throw new NotFoundException('Employee not found');
     }
 
-    // Determine requester and provider based on service kind
-    let requesterId: string;
-    let providerId: string;
-
-    if (service.kind === ServiceKind.OFFER) {
-      // User is requesting the offered service
-      requesterId = userId;
-      providerId = service.createdByUserId;
-    } else {
-      // User is offering to fulfill the request
-      requesterId = service.createdByUserId;
-      providerId = userId;
+    if (employee.businessId !== businessService.businessId) {
+      throw new BadRequestException('Employee does not belong to this business');
     }
 
-    return this.prisma.booking.create({
+    // Business owners cannot book appointments
+    const userBusiness = await this.prisma.business.findUnique({
+      where: { ownerId: userId },
+    });
+    if (userBusiness) {
+      throw new ForbiddenException(
+        'Les comptes professionnels ne peuvent pas effectuer de réservations. Veuillez utiliser un compte client.',
+      );
+    }
+
+    // Check if client is blocked by this business
+    const isBlocked = await this.clientsService.isClientBlocked(
+      businessService.businessId,
+      userId,
+    );
+    if (isBlocked) {
+      throw new ForbiddenException(
+        'Vous ne pouvez pas effectuer de réservation auprès de ce professionnel',
+      );
+    }
+
+    // Validate selected options: each must belong to the service's category, be active,
+    // and respect the "one per group" rule for grouped options.
+    const selectedIds = dto.selectedOptionIds ?? [];
+    const allowedOptions = (businessService.businessCategory?.options ?? []).filter(
+      (opt) => opt.isActive,
+    );
+    const allowedMap = new Map(allowedOptions.map((o) => [o.id, o]));
+    const selectedOptions: typeof allowedOptions = [];
+    const seenGroups = new Set<string>();
+    for (const id of selectedIds) {
+      const opt = allowedMap.get(id);
+      if (!opt) {
+        throw new BadRequestException(
+          'Option non disponible pour cette prestation',
+        );
+      }
+      if (opt.groupName) {
+        if (seenGroups.has(opt.groupName)) {
+          throw new BadRequestException(
+            `Une seule option autorisée pour le groupe ${opt.groupName}`,
+          );
+        }
+        seenGroups.add(opt.groupName);
+      }
+      selectedOptions.push(opt);
+    }
+
+    const optionsTotalCents = selectedOptions.reduce(
+      (sum, o) => sum + o.priceCents,
+      0,
+    );
+    const optionsTotalMinutes = selectedOptions.reduce(
+      (sum, o) => sum + (o.durationMinutes ?? 0),
+      0,
+    );
+    const totalDurationMinutes =
+      businessService.durationMinutes + optionsTotalMinutes;
+    const totalPriceCents = businessService.priceCents + optionsTotalCents;
+
+    // Calculate scheduledEndAt based on total duration (service + options)
+    let scheduledAt: Date | undefined;
+    let scheduledEndAt: Date | undefined;
+    if (dto.scheduledAt) {
+      scheduledAt = new Date(dto.scheduledAt);
+      scheduledEndAt = new Date(scheduledAt.getTime() + totalDurationMinutes * 60000);
+    }
+
+    // Check if business has auto-accept enabled
+    const autoAccept = businessService.business.autoAcceptBookings;
+
+    // The requester is the user booking, the provider is the business owner
+    const booking = await this.prisma.booking.create({
       data: {
-        serviceId: dto.serviceId,
-        requesterId,
-        providerId,
-        agreedPriceCents: dto.agreedPriceCents,
-        scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
+        requesterId: userId,
+        providerId: businessService.business.ownerId,
+        businessServiceId: dto.businessServiceId,
+        employeeId: dto.employeeId,
+        agreedPriceCents: totalPriceCents,
+        scheduledAt,
+        scheduledEndAt,
+        ...(autoAccept && { status: BookingStatus.ACCEPTED }),
+        options: selectedOptions.length
+          ? {
+              create: selectedOptions.map((opt) => ({
+                serviceOptionId: opt.id,
+                name: opt.name,
+                priceCents: opt.priceCents,
+              })),
+            }
+          : undefined,
       },
       include: {
-        service: true,
+        businessService: {
+          include: {
+            business: true,
+          },
+        },
+        employee: true,
         requester: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         provider: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
+        options: true,
       },
     });
+
+    if (autoAccept) {
+      // Auto-accept: notify the client (same flow as manual accept)
+      const businessName = businessService.business.name;
+      const serviceTitle = businessService.name;
+      await this.notificationsService.notifyBookingAccepted(
+        userId,
+        businessName,
+        serviceTitle,
+        booking.id,
+      );
+
+      // Also notify the business owner about the new auto-accepted booking
+      const requesterName = booking.requester.name || 'Quelqu\'un';
+      await this.notificationsService.notifyNewBooking(
+        businessService.business.ownerId,
+        requesterName,
+        serviceTitle,
+        booking.id,
+      );
+
+      // Send real-time status update to requester
+      this.websocketGateway.sendBookingStatusUpdate(userId, {
+        ...booking,
+        status: BookingStatus.ACCEPTED,
+      });
+    } else {
+      // Send notification to business owner (provider)
+      const requesterName = booking.requester.name || 'Quelqu\'un';
+      await this.notificationsService.notifyNewBooking(
+        businessService.business.ownerId,
+        requesterName,
+        businessService.name,
+        booking.id,
+      );
+    }
+
+    // Auto-create client record (fire-and-forget)
+    this.clientsService
+      .ensureClient(businessService.businessId, userId)
+      .catch(() => {});
+
+    return booking;
   }
 
   async accept(userId: string, bookingId: string) {
@@ -74,52 +224,109 @@ export class BookingsService {
       throw new BadRequestException('Booking must be PENDING to accept');
     }
 
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: { status: BookingStatus.ACCEPTED },
     });
-  }
 
-  async start(userId: string, bookingId: string) {
-    const booking = await this.findOneOrFail(bookingId);
-    this.assertUserInBooking(userId, booking);
+    // Send notification to requester (use business name instead of owner name)
+    const businessName = booking.businessService?.business?.name || booking.provider.name || 'Le prestataire';
+    const serviceTitle = booking.businessService?.name || 'un service';
+    await this.notificationsService.notifyBookingAccepted(
+      booking.requesterId,
+      businessName,
+      serviceTitle,
+      bookingId,
+    );
 
-    if (booking.status !== BookingStatus.ACCEPTED) {
-      throw new BadRequestException('Booking must be ACCEPTED to start');
-    }
-
-    return this.prisma.booking.update({
-      where: { id: bookingId },
-      data: { status: BookingStatus.IN_PROGRESS },
+    // Send real-time status update to requester
+    this.websocketGateway.sendBookingStatusUpdate(booking.requesterId, {
+      ...booking,
+      status: BookingStatus.ACCEPTED,
     });
+
+    return updated;
   }
 
   async complete(userId: string, bookingId: string) {
     const booking = await this.findOneOrFail(bookingId);
     this.assertUserInBooking(userId, booking);
 
-    if (booking.status !== BookingStatus.IN_PROGRESS) {
-      throw new BadRequestException('Booking must be IN_PROGRESS to complete');
+    if (booking.status !== BookingStatus.ACCEPTED) {
+      throw new BadRequestException('Booking must be ACCEPTED to complete');
     }
 
-    // Award XP for completing a booking
-    await this.prisma.userReputation.upsert({
-      where: { userId: booking.requesterId },
-      update: { xp: { increment: 5 } },
-      create: { userId: booking.requesterId, xp: 5 },
-    });
-
-    await this.prisma.userReputation.upsert({
-      where: { userId: booking.providerId },
-      update: { xp: { increment: 5 } },
-      create: { userId: booking.providerId, xp: 5 },
-    });
-
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: {
         status: BookingStatus.COMPLETED,
         completedAt: new Date(),
+      },
+    });
+
+    // Invalidate client stats cache
+    const businessId = booking.businessService?.businessId;
+    if (businessId) {
+      this.cacheService
+        .del(CacheService.clientStatsKey(businessId, booking.requesterId))
+        .catch(() => {});
+    }
+
+    return updated;
+  }
+
+  /**
+   * Auto-complete bookings that have passed their scheduled time
+   */
+  async autoCompleteExpiredBookings() {
+    const now = new Date();
+
+    const expiredBookings = await this.prisma.booking.findMany({
+      where: {
+        status: BookingStatus.ACCEPTED,
+        kind: CalendarEntryKind.APPOINTMENT,
+        scheduledAt: {
+          lt: now,
+        },
+      },
+    });
+
+    const results = [];
+    for (const booking of expiredBookings) {
+      try {
+        await this.prisma.booking.update({
+          where: { id: booking.id },
+          data: {
+            status: BookingStatus.COMPLETED,
+            completedAt: now,
+          },
+        });
+        results.push({ id: booking.id, success: true });
+      } catch (error) {
+        results.push({ id: booking.id, success: false, error: error.message });
+      }
+    }
+
+    return { processed: results.length, results };
+  }
+
+  /**
+   * Lazy auto-complete: mark expired bookings as COMPLETED for a specific user.
+   * Uses updateMany (single SQL query) instead of looping individual updates.
+   */
+  private async autoCompleteExpiredForUser(userId: string) {
+    const now = new Date();
+
+    await this.prisma.booking.updateMany({
+      where: {
+        status: { in: [BookingStatus.ACCEPTED, BookingStatus.PENDING] },
+        kind: CalendarEntryKind.APPOINTMENT,
+        scheduledEndAt: { lt: now },
+        OR: [{ requesterId: userId }, { providerId: userId }],
+      },
+      data: {
+        status: BookingStatus.COMPLETED,
+        completedAt: now,
       },
     });
   }
@@ -135,13 +342,102 @@ export class BookingsService {
       throw new BadRequestException('Cannot cancel a completed or already canceled booking');
     }
 
-    return this.prisma.booking.update({
+    const updated = await this.prisma.booking.update({
       where: { id: bookingId },
-      data: { status: BookingStatus.CANCELED },
+      data: { status: BookingStatus.CANCELED, canceledById: userId },
+    });
+
+    // Invalidate client stats cache
+    const businessId = booking.businessService?.businessId;
+    if (businessId) {
+      this.cacheService
+        .del(CacheService.clientStatsKey(businessId, booking.requesterId))
+        .catch(() => {});
+    }
+
+    // Determine who is canceling and notify the other party
+    const isRequester = booking.requesterId === userId;
+    const cancellerName = isRequester
+      ? booking.requester.name || 'Le demandeur'
+      : booking.businessService?.business?.name || booking.provider.name || 'Le prestataire';
+    const serviceTitle = booking.businessService?.name || 'un service';
+    const otherUserId = isRequester ? booking.providerId : booking.requesterId;
+
+    await this.notificationsService.notifyBookingCanceled(
+      otherUserId,
+      cancellerName,
+      serviceTitle,
+      bookingId,
+    );
+
+    // Send real-time status update to the other party
+    this.websocketGateway.sendBookingStatusUpdate(otherUserId, {
+      ...booking,
+      status: BookingStatus.CANCELED,
+    });
+
+    return updated;
+  }
+
+  async deleteByRequester(userId: string, bookingId: string) {
+    const booking = await this.findOneOrFail(bookingId);
+
+    if (booking.requesterId !== userId && booking.providerId !== userId) {
+      throw new ForbiddenException('You are not part of this booking');
+    }
+
+    if (booking.status !== BookingStatus.CANCELED) {
+      throw new BadRequestException('Only canceled bookings can be deleted');
+    }
+
+    return this.prisma.booking.delete({
+      where: { id: bookingId },
     });
   }
 
-  async findByUser(userId: string, role?: 'requester' | 'provider') {
+  async reject(userId: string, bookingId: string, message?: string) {
+    const booking = await this.findOneOrFail(bookingId);
+
+    if (booking.providerId !== userId) {
+      throw new ForbiddenException('Only the provider can reject a booking');
+    }
+
+    if (booking.status !== BookingStatus.PENDING) {
+      throw new BadRequestException('Booking must be PENDING to reject');
+    }
+
+    const updated = await this.prisma.booking.update({
+      where: { id: bookingId },
+      data: {
+        status: BookingStatus.REJECTED,
+        rejectionMessage: message,
+      },
+    });
+
+    // Send notification to requester (use business name instead of owner name)
+    const businessName = booking.businessService?.business?.name || booking.provider.name || 'Le prestataire';
+    const serviceTitle = booking.businessService?.name || 'un service';
+    await this.notificationsService.notifyBookingRejected(
+      booking.requesterId,
+      businessName,
+      serviceTitle,
+      bookingId,
+    );
+
+    // Send real-time status update to requester
+    this.websocketGateway.sendBookingStatusUpdate(booking.requesterId, {
+      ...booking,
+      status: BookingStatus.REJECTED,
+      rejectionMessage: message,
+    });
+
+    return updated;
+  }
+
+  async findByUser(userId: string, role?: 'requester' | 'provider', from?: string, to?: string) {
+    // First, auto-complete any expired ACCEPTED bookings for this user
+    await this.autoCompleteExpiredForUser(userId);
+
     const where: any = {};
 
     if (role === 'requester') {
@@ -152,25 +448,44 @@ export class BookingsService {
       where.OR = [{ requesterId: userId }, { providerId: userId }];
     }
 
+    // Date filtering on scheduledAt
+    if (from || to) {
+      where.scheduledAt = {};
+      if (from) {
+        where.scheduledAt.gte = new Date(from);
+      }
+      if (to) {
+        where.scheduledAt.lte = new Date(to);
+      }
+    }
+
     return this.prisma.booking.findMany({
       where,
       include: {
-        service: {
-          select: { id: true, title: true, kind: true },
+        businessService: {
+          include: {
+            business: {
+              select: { id: true, name: true, slug: true, address: true, city: true },
+            },
+          },
+        },
+        employee: {
+          select: { id: true, firstName: true, lastName: true, avatarUrl: true },
         },
         requester: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         provider: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         reviews: true,
+        options: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -180,20 +495,26 @@ export class BookingsService {
     return this.prisma.booking.findUnique({
       where: { id: bookingId },
       include: {
-        service: true,
+        businessService: {
+          include: {
+            business: true,
+          },
+        },
+        employee: true,
         requester: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         provider: {
           select: {
             id: true,
-            profile: { select: { displayName: true, avatarUrl: true } },
+            name: true,
           },
         },
         reviews: true,
+        options: true,
       },
     });
   }
@@ -204,6 +525,41 @@ export class BookingsService {
       throw new NotFoundException('Booking not found');
     }
     return booking;
+  }
+
+  /**
+   * Revenue stats: daily aggregation of completed bookings over a date range.
+   * Returns { date, revenue, count } for each day with at least one completed booking.
+   */
+  async getRevenueStats(userId: string, from: Date, to: Date) {
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        providerId: userId,
+        status: BookingStatus.COMPLETED,
+        scheduledAt: { gte: from, lte: to },
+      },
+      select: {
+        scheduledAt: true,
+        agreedPriceCents: true,
+      },
+      orderBy: { scheduledAt: 'asc' },
+    });
+
+    // Group by day
+    const dayMap = new Map<string, { revenue: number; count: number }>();
+    for (const b of bookings) {
+      const day = b.scheduledAt!.toISOString().slice(0, 10);
+      const existing = dayMap.get(day) || { revenue: 0, count: 0 };
+      existing.revenue += b.agreedPriceCents || 0;
+      existing.count += 1;
+      dayMap.set(day, existing);
+    }
+
+    return Array.from(dayMap.entries()).map(([date, stats]) => ({
+      date,
+      revenue: stats.revenue,
+      count: stats.count,
+    }));
   }
 
   private assertUserInBooking(userId: string, booking: any) {

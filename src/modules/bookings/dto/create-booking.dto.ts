@@ -1,8 +1,11 @@
-import { IsString, IsOptional, IsInt, IsDateString, Min } from 'class-validator';
+import { IsString, IsOptional, IsInt, IsDateString, Min, IsArray } from 'class-validator';
 
 export class CreateBookingDto {
   @IsString()
-  serviceId: string;
+  businessServiceId: string;
+
+  @IsString()
+  employeeId: string;
 
   @IsOptional()
   @IsInt()
@@ -12,4 +15,20 @@ export class CreateBookingDto {
   @IsOptional()
   @IsDateString()
   scheduledAt?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  // Selected ServiceOption ids to attach to this booking
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  selectedOptionIds?: string[];
+}
+
+export class RejectBookingDto {
+  @IsOptional()
+  @IsString()
+  message?: string;
 }

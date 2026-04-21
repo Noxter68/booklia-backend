@@ -8,6 +8,9 @@ async function bootstrap() {
     rawBody: true,
   });
 
+  // Trust proxy headers (Railway, Vercel, etc.)
+  app.set('trust proxy', 1);
+
   app.enableCors({
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
@@ -27,7 +30,7 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3001;
   await app.listen(port);
-  console.log(`Backend running on http://localhost:${port}`);
+  console.log(`[${process.env.NODE_ENV || 'development'}] Backend running on port ${port}`);
 }
 
 bootstrap();

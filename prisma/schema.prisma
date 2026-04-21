@@ -23,28 +23,39 @@ model User {
   emailVerified Boolean   @default(false)
   image         String?
 
-  // Business flag
-  isBusiness Boolean @default(false)
+  // Admin flag
+  isAdmin Boolean @default(false)
 
-  // Stripe
-  stripeCustomerId     String?              @unique
-  stripeSubscriptionId String?
-  subscriptionStatus   SubscriptionStatus   @default(FREE)
+  // Preferred locale (fr, en, pt)
+  locale String @default("fr")
 
   // Relations
-  profile           Profile?
   sessions          Session[]
   accounts          Account[]
-  createdServices   Service[]
   bookingsAsRequester Booking[] @relation("BookingRequester")
   bookingsAsProvider  Booking[] @relation("BookingProvider")
   reviewsWritten    Review[]  @relation("ReviewAuthor")
   reviewsReceived   Review[]  @relation("ReviewTarget")
-  reputation        UserReputation?
+  notifications     Notification[]
 
   // Business relations
   ownedBusiness     Business?
   employeeAt        Employee?
+
+  // Client management
+  businessClients   BusinessClient[]
+  bookingsCanceled  Booking[] @relation("BookingCanceler")
+
+  // Booking notes
+  bookingNotesAsClient  BookingNote[] @relation("BookingNoteClient")
+  bookingNotesCreated   BookingNote[] @relation("BookingNoteCreator")
+
+  // Invoicing
+  invoicesAsClient  Invoice[] @relation("InvoiceClient")
+  invoicesCreated   Invoice[] @relation("InvoiceCreator")
+
+  // Batch generations
+  batchGenerations  BatchGeneration[] @relation("BatchGenerationCreator")
 }
 
 model Session {
@@ -98,9 +109,14 @@ model Business {
   ownerId     String   @unique
   name        String
   slug        String   @unique
-  description String?
-  logoUrl     String?
+  description  String?
+  presentation String? // Rich HTML from WYSIWYG editor
+  logoUrl      String?
   coverUrl    String?
+
+  // Main Category (for search/filtering)
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
 
   // Contact
   phone   String?
@@ -125,16 +141,91 @@ model Business {
   isVerified    Boolean @default(false)
   isActive      Boolean @default(true)
   acceptsOnlineBooking Boolean @default(true)
+  isEarlyAdopter Boolean @default(false)
+
+  // Vacation mode
+  isOnVacation    Boolean @default(false)
+  vacationMessage String?
+
+  // Auto-accept bookings
+  autoAcceptBookings Boolean @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  owner     User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  employees Employee[]
-  services  BusinessService[]
+  owner      User       @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  employees  Employee[]
+  services   BusinessService[]
+  hours      BusinessHours[]
+  categories BusinessCategory[]
+  images     BusinessImage[]
+  promotions BusinessPromotion[]
+  clients    BusinessClient[]
+
+  // Booking notes & Invoicing
+  bookingNotes     BookingNote[]
+  billingSettings  BusinessBillingSettings?
+  invoices         Invoice[]
+  batchGenerations BatchGeneration[]
 
   @@index([city])
+  @@index([categoryId])
+}
+
+model BusinessPromotion {
+  id          String   @id @default(cuid())
+  businessId  String
+  title       String
+  description String?
+  imageUrl    String?
+  startDate   DateTime
+  endDate     DateTime
+  isActive    Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([startDate, endDate])
+}
+
+model BusinessImage {
+  id         String @id @default(cuid())
+  businessId String
+  url        String
+  sortOrder  Int    @default(0)
+
+  createdAt DateTime @default(now())
+
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+}
+
+model BusinessClient {
+  id         String   @id @default(cuid())
+  businessId String
+  userId     String
+  isBlocked  Boolean  @default(false)
+  notes      String?
+  phone      String?
+  address    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, userId])
+  @@index([businessId])
+  @@index([userId])
 }
 
 model Employee {
@@ -179,12 +270,70 @@ model EmployeeAvailability {
   @@unique([employeeId, dayOfWeek])
 }
 
+model BusinessHours {
+  id         String @id @default(cuid())
+  businessId String
+
+  dayOfWeek  Int     // 0 = Sunday, 1 = Monday, etc.
+  startTime  String  // "09:00"
+  endTime    String  // "18:00"
+  isClosed   Boolean @default(false)
+
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, dayOfWeek])
+}
+
+model BusinessCategory {
+  id         String @id @default(cuid())
+  businessId String
+  name       String
+  sortOrder  Int    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  services BusinessService[]
+  options  ServiceOption[]
+
+  @@unique([businessId, name])
+  @@index([businessId])
+}
+
+// Options attached to a BusinessCategory. Services created in that category
+// can opt-in to any of these options. Options with the same non-null groupName
+// form a radio group (single choice); options without groupName are free checkboxes.
+model ServiceOption {
+  id                 String  @id @default(cuid())
+  businessCategoryId String
+  name               String
+  description        String? // optional short description shown to clients
+  priceCents         Int     @default(0) // delta added on top of service price
+  durationMinutes    Int?    // optional extra duration (not used for now)
+  groupName          String? // options sharing the same group are mutually exclusive
+  sortOrder          Int     @default(0)
+  isActive           Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  businessCategory BusinessCategory @relation(fields: [businessCategoryId], references: [id], onDelete: Cascade)
+  bookingOptions   BookingOption[]
+
+  @@index([businessCategoryId])
+}
+
 model BusinessService {
   id          String @id @default(cuid())
   businessId  String
 
   name        String
   description String?
+  detailedDescription String? // Rich text HTML content for detailed service info
 
   // Pricing
   priceCents  Int
@@ -193,9 +342,13 @@ model BusinessService {
   // Duration in minutes
   durationMinutes Int
 
-  // Category
+  // Global Category (deprecated for business services)
   categoryId String?
   category   Category? @relation(fields: [categoryId], references: [id])
+
+  // Business-specific Category
+  businessCategoryId String?
+  businessCategory   BusinessCategory? @relation(fields: [businessCategoryId], references: [id])
 
   isActive   Boolean @default(true)
 
@@ -209,6 +362,7 @@ model BusinessService {
 
   @@index([businessId])
   @@index([categoryId])
+  @@index([businessCategoryId])
 }
 
 model EmployeeService {
@@ -223,94 +377,8 @@ model EmployeeService {
 }
 
 // ============================================
-// PROFILE
+// CATEGORY
 // ============================================
-
-model Profile {
-  userId      String  @id
-  displayName String?
-  avatarUrl   String?
-  bio         String?
-  city        String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-// ============================================
-// SERVICE
-// ============================================
-
-model Service {
-  id          String        @id @default(cuid())
-  kind        ServiceKind
-  title       String
-  description String
-
-  // Pricing
-  priceMinCents Int?
-  priceMaxCents Int?
-  currency      String @default("EUR")
-
-  // Duration (in minutes)
-  durationMinutes Int?
-
-  // Availability
-  availableDays     String[] // e.g. ["MONDAY", "TUESDAY", "WEDNESDAY"]
-  availableFromTime String?  // e.g. "09:00"
-  availableToTime   String?  // e.g. "18:00"
-  availableFromDate DateTime?
-  availableToDate   DateTime?
-
-  // Location
-  city      String?
-  latitude  Float?
-  longitude Float?
-
-  // Category & Tags
-  categoryId String?
-  category   Category? @relation(fields: [categoryId], references: [id])
-  tags       ServiceTag[]
-
-  // Owner
-  createdByUserId String
-  createdBy       User   @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
-
-  // Status
-  status ServiceStatus @default(DRAFT)
-
-  // Time
-  deadlineAt DateTime?
-  expiresAt  DateTime
-
-  // Urgency
-  urgency Urgency @default(FLEXIBLE)
-
-  // Recurrence
-  isRecurring    Boolean     @default(false)
-  recurrence     Recurrence  @default(ONE_TIME)
-  sessionsCount  Int?
-
-  // Boost
-  boostedUntil DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Relations
-  bookings Booking[]
-
-  @@index([kind])
-  @@index([status])
-  @@index([categoryId])
-  @@index([createdByUserId])
-  @@index([expiresAt])
-  @@index([boostedUntil])
-  @@index([city])
-  @@index([latitude, longitude])
-}
 
 model Category {
   id       String  @id @default(cuid())
@@ -318,27 +386,14 @@ model Category {
   slug     String  @unique
   parentId String?
 
+  // Translations stored as JSON: { "en": "Hairdresser", "pt": "Cabeleireiro" }
+  // The "name" field is the default (French) name
+  translations Json?
+
   parent           Category?         @relation("CategoryHierarchy", fields: [parentId], references: [id])
   children         Category[]        @relation("CategoryHierarchy")
-  services         Service[]
   businessServices BusinessService[]
-}
-
-model Tag {
-  id   String @id @default(cuid())
-  name String @unique
-
-  services ServiceTag[]
-}
-
-model ServiceTag {
-  serviceId String
-  tagId     String
-
-  service Service @relation(fields: [serviceId], references: [id], onDelete: Cascade)
-  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
-
-  @@id([serviceId, tagId])
+  businesses       Business[]
 }
 
 // ============================================
@@ -348,16 +403,19 @@ model ServiceTag {
 model Booking {
   id        String @id @default(cuid())
 
-  // For P2P bookings (individual services)
-  serviceId   String?
+  // Users involved
   requesterId String
   providerId  String
 
-  // For Business bookings
+  // Business booking
   businessServiceId String?
-  employeeId        String?
+  employeeId        String
 
   status BookingStatus @default(PENDING)
+
+  // Calendar fields
+  kind        CalendarEntryKind @default(APPOINTMENT)
+  blockReason BlockReason?
 
   agreedPriceCents Int?
   scheduledAt      DateTime?
@@ -367,24 +425,79 @@ model Booking {
   // Client notes
   notes String?
 
+  // Rejection message (when provider declines)
+  rejectionMessage String?
+
+  // Who canceled (null if not canceled)
+  canceledById String?
+
+  // Email reminder tracking
+  reminderSentAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
-  service         Service?         @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   businessService BusinessService? @relation(fields: [businessServiceId], references: [id], onDelete: Cascade)
-  employee        Employee?        @relation(fields: [employeeId], references: [id])
-  requester       User             @relation("BookingRequester", fields: [requesterId], references: [id])
-  provider        User             @relation("BookingProvider", fields: [providerId], references: [id])
+  employee        Employee         @relation(fields: [employeeId], references: [id])
+  requester       User            @relation("BookingRequester", fields: [requesterId], references: [id])
+  provider        User            @relation("BookingProvider", fields: [providerId], references: [id])
+  canceledBy      User?           @relation("BookingCanceler", fields: [canceledById], references: [id])
   reviews         Review[]
+  bookingNote     BookingNote?
+  invoice         Invoice?
+  options         BookingOption[]
 
-  @@index([serviceId])
   @@index([businessServiceId])
   @@index([employeeId])
   @@index([requesterId])
   @@index([providerId])
   @@index([status])
   @@index([scheduledAt])
+  @@index([employeeId, scheduledAt])
+}
+
+// Snapshot of options selected at booking time. Keeps name + price frozen
+// so edits/deletes to ServiceOption don't retroactively change past bookings.
+model BookingOption {
+  id              String @id @default(cuid())
+  bookingId       String
+  serviceOptionId String? // nullable so option deletion doesn't cascade-delete history
+  name            String
+  priceCents      Int
+
+  createdAt DateTime @default(now())
+
+  booking       Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  serviceOption ServiceOption? @relation(fields: [serviceOptionId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  type      NotificationType
+  title     String
+  message   String
+
+  // Reference to related entity
+  bookingId String?
+
+  isRead    Boolean          @default(false)
+
+  createdAt DateTime         @default(now())
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
 }
 
 // ============================================
@@ -397,8 +510,10 @@ model Review {
   authorId     String
   targetUserId String
   type         ReviewType
-  score        Int        // 0-10
+  score        Int        // 1-5
   comment      String?
+  reply        String?    // Business owner reply
+  repliedAt    DateTime?
 
   createdAt DateTime @default(now())
 
@@ -412,23 +527,6 @@ model Review {
 }
 
 // ============================================
-// REPUTATION
-// ============================================
-
-model UserReputation {
-  userId      String @id
-  ratingAvg10 Float  @default(0)
-  ratingCount Int    @default(0)
-  xp          Int    @default(0)
-  level       Int    @default(1)
-  trustScore  Float  @default(0)
-
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-// ============================================
 // ENUMS
 // ============================================
 
@@ -438,47 +536,200 @@ enum SubscriptionStatus {
   CANCELED
 }
 
-enum ServiceKind {
-  OFFER
-  REQUEST
-}
-
-enum ServiceStatus {
-  DRAFT
-  PUBLISHED
-  PAUSED
-}
-
-enum Urgency {
-  URGENT
-  SOON
-  FLEXIBLE
-}
-
-enum Recurrence {
-  ONE_TIME
-  WEEKLY
-  BIWEEKLY
-  MONTHLY
-  CUSTOM
-}
-
 enum BookingStatus {
   PENDING
   ACCEPTED
-  IN_PROGRESS
+  REJECTED
   COMPLETED
   CANCELED
-  DISPUTED
+  NO_SHOW
+}
+
+enum CalendarEntryKind {
+  APPOINTMENT
+  BLOCK
+}
+
+enum BlockReason {
+  BREAK
+  UNAVAILABLE
+  PERSONAL
+  CLOSED
 }
 
 enum ReviewType {
   REVIEW_PROVIDER
-  REVIEW_REQUESTER
 }
 
 enum BusinessTier {
   STARTER   // Free tier - limited features
   PRO       // Monthly subscription - full features
   PREMIUM   // Premium features + priority support
+}
+
+enum NotificationType {
+  BOOKING_NEW           // New booking received
+  BOOKING_ACCEPTED      // Your booking was accepted
+  BOOKING_REJECTED      // Your booking was rejected
+  BOOKING_CANCELED      // Booking was canceled
+  BOOKING_COMPLETED     // Booking was completed
+  REVIEW_RECEIVED       // Someone left you a review
+}
+
+enum NoteVisibility {
+  PRIVATE_BUSINESS
+}
+
+enum VatMode {
+  FRANCHISE_293B
+  STANDARD
+}
+
+enum InvoiceStatus {
+  DRAFT
+  FINALIZED
+  CANCELLED
+}
+
+enum InvoiceLineKind {
+  SERVICE
+  PRODUCT
+  OTHER
+}
+
+// ============================================
+// BOOKING NOTES
+// ============================================
+
+model BookingNote {
+  id              String         @id @default(cuid())
+  businessId      String
+  clientId        String         // userId du client (requester)
+  bookingId       String         @unique
+  createdByUserId String
+  visibility      NoteVisibility @default(PRIVATE_BUSINESS)
+  content         String
+  structured      Json?
+  tags            String[]       @default([])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business  Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  client    User     @relation("BookingNoteClient", fields: [clientId], references: [id])
+  booking   Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("BookingNoteCreator", fields: [createdByUserId], references: [id])
+
+  @@index([businessId, clientId, createdAt])
+}
+
+// ============================================
+// BILLING & INVOICING
+// ============================================
+
+model BusinessBillingSettings {
+  id                  String  @id @default(cuid())
+  businessId          String  @unique
+  legalName           String
+  addressLine1        String
+  addressLine2        String?
+  postalCode          String
+  city                String
+  country             String  @default("FR")
+  siret               String
+  vatNumber           String?
+  vatMode             VatMode @default(FRANCHISE_293B)
+  invoicePrefix       String
+  nextInvoiceSequence Int     @default(1)
+  logoKey             String?
+  paymentTerms        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+model Invoice {
+  id              String        @id @default(cuid())
+  businessId      String
+  clientId        String?
+  bookingId       String?       @unique
+  status          InvoiceStatus @default(DRAFT)
+  invoiceNumber   String?
+  issueDate       DateTime?
+  serviceDate     DateTime?
+  currency        String        @default("EUR")
+  totalHTCents    Int           @default(0)
+  totalVATCents   Int           @default(0)
+  totalTTCCents   Int           @default(0)
+  vatMode         VatMode       @default(FRANCHISE_293B)
+  snapshot        Json?
+  pdfKey          String?
+  createdByUserId String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business  Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  client    User?         @relation("InvoiceClient", fields: [clientId], references: [id])
+  booking   Booking?      @relation(fields: [bookingId], references: [id])
+  createdBy User          @relation("InvoiceCreator", fields: [createdByUserId], references: [id])
+  lines     InvoiceLine[]
+
+  @@unique([businessId, invoiceNumber])
+  @@index([businessId, createdAt])
+}
+
+model InvoiceLine {
+  id               String          @id @default(cuid())
+  invoiceId        String
+  kind             InvoiceLineKind @default(SERVICE)
+  label            String
+  quantity         Int             @default(1)
+  unitPriceHTCents Int
+  vatRate          Float           @default(0)
+  totalHTCents     Int             @default(0)
+  totalVATCents    Int             @default(0)
+  totalTTCCents    Int             @default(0)
+  sortOrder        Int             @default(0)
+
+  // Relations
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+// ============================================================================
+// Batch Invoice Generation History
+// ============================================================================
+
+enum BatchGenerationStatus {
+  COMPLETED
+  FAILED
+}
+
+model BatchGeneration {
+  id             String                @id @default(cuid())
+  businessId     String
+  createdByUserId String
+  status         BatchGenerationStatus @default(COMPLETED)
+  startDate      DateTime
+  endDate        DateTime
+  invoiceCount   Int                   @default(0)
+  totalHTCents   Int                   @default(0)
+  totalVATCents  Int                   @default(0)
+  totalTTCCents  Int                   @default(0)
+  invoiceIds     String[]
+  errors         String[]
+  createdAt      DateTime              @default(now())
+
+  // Relations
+  business  Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("BatchGenerationCreator", fields: [createdByUserId], references: [id])
+
+  @@index([businessId, createdAt])
 }

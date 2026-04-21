@@ -4,6 +4,7 @@ import {
   IsEnum,
   MinLength,
   MaxLength,
+  Matches,
 } from 'class-validator';
 
 enum VatMode {
@@ -51,6 +52,7 @@ export class UpsertBillingSettingsDto {
   @IsString()
   @MinLength(1)
   @MaxLength(10)
+  @Matches(/^[A-Z0-9-]+$/i, { message: 'Le préfixe ne peut contenir que des lettres, chiffres et tirets' })
   invoicePrefix: string;
 
   @IsOptional()

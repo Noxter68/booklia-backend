@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Put,
   Body,
   Param,
@@ -10,7 +11,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { ClientsService } from './clients.service';
-import { UpdateBusinessClientDto } from './dto/client.dto';
+import { CreateBusinessClientDto, UpdateBusinessClientDto } from './dto/client.dto';
 import { AuthGuard } from '../auth/auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -31,6 +32,12 @@ export class ClientsController {
       throw new NotFoundException('Business non trouvé');
     }
     return business.id;
+  }
+
+  @Post()
+  async createClient(@Req() req: any, @Body() dto: CreateBusinessClientDto) {
+    const businessId = await this.getBusinessId(req.user.id);
+    return this.clientsService.createClient(businessId, dto);
   }
 
   @Get()

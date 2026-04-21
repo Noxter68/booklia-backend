@@ -3,6 +3,7 @@
 
 import { wrapInLayout, ctaButton, detailRow, detailsTable } from './base-layout';
 import { formatDate, formatTime } from './helpers';
+import { getEmailTranslations } from './i18n';
 
 export interface BookingCanceledData {
   clientName: string;
@@ -11,44 +12,47 @@ export interface BookingCanceledData {
   scheduledAt: Date | null;
   canceledBy: string;
   frontendUrl: string;
+  locale?: string;
 }
 
 export function buildBookingCanceledEmail(data: BookingCanceledData): {
   subject: string;
   html: string;
 } {
+  const locale = data.locale || 'fr';
+  const t = getEmailTranslations(locale);
+
   const rows = [
-    detailRow('Salon', data.businessName),
-    detailRow('Prestation', data.serviceName),
+    detailRow(t.salon, data.businessName),
+    detailRow(t.service, data.serviceName),
     ...(data.scheduledAt
       ? [
-          detailRow('Date', formatDate(data.scheduledAt)),
-          detailRow('Heure', formatTime(data.scheduledAt)),
+          detailRow(t.date, formatDate(data.scheduledAt, locale)),
+          detailRow(t.time, formatTime(data.scheduledAt, locale)),
         ]
       : []),
-    detailRow('Annulé par', data.canceledBy),
+    detailRow(t.canceledBy, data.canceledBy),
   ].join('');
 
   const content = `
     <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#2D3436;">
-      Rendez-vous annulé
+      ${t.bookingCanceledTitle}
     </h1>
     <p style="margin:0 0 20px;font-size:15px;color:#636E72;line-height:1.5;">
-      Bonjour ${data.clientName},<br>
-      Votre rendez-vous chez <strong>${data.businessName}</strong> a été annulé.
+      ${t.bookingCanceledBody(data.clientName, data.businessName)}
     </p>
 
     ${detailsTable(rows)}
 
     <p style="margin:20px 0 0;font-size:14px;color:#636E72;line-height:1.5;">
-      Vous pouvez reprendre rendez-vous à tout moment.
+      ${t.bookingCanceledFooter}
     </p>
 
-    ${ctaButton('Reprendre rendez-vous', `${data.frontendUrl}/search`)}
+    ${ctaButton(t.bookingCanceledCta, `${data.frontendUrl}/search`)}
   `;
 
   return {
-    subject: `Rendez-vous annulé — ${data.businessName}`,
-    html: wrapInLayout(content, `Votre rendez-vous chez ${data.businessName} a été annulé.`),
+    subject: t.bookingCanceledSubject(data.businessName),
+    html: wrapInLayout(content, t.bookingCanceledPreview(data.businessName), locale),
   };
 }

@@ -2,37 +2,39 @@
 // Sent when an admin manually creates a business account.
 
 import { wrapInLayout, ctaButton } from './base-layout';
+import { getEmailTranslations } from './i18n';
 
 export interface AdminInvitationData {
   userName: string;
   appName: string;
   verificationUrl: string;
+  locale?: string;
 }
 
 export function buildAdminInvitationEmail(data: AdminInvitationData): {
   subject: string;
   html: string;
 } {
+  const locale = data.locale || 'fr';
+  const t = getEmailTranslations(locale);
+
   const content = `
     <h1 style="margin:0 0 8px;font-size:22px;font-weight:700;color:#2D3436;">
-      Vérifiez votre identité
+      ${t.adminInviteTitle}
     </h1>
     <p style="margin:0 0 20px;font-size:15px;color:#636E72;line-height:1.5;">
-      Bonjour ${data.userName},<br>
-      Un administrateur de ${data.appName} vous invite à vérifier votre identité.
-      Cliquez sur le bouton ci-dessous pour confirmer votre adresse email.
-      Ce lien expire dans 24 heures.
+      ${t.adminInviteBody(data.userName, data.appName)}
     </p>
 
-    ${ctaButton('Vérifier mon identité', data.verificationUrl)}
+    ${ctaButton(t.adminInviteCta, data.verificationUrl)}
 
     <p style="margin:24px 0 0;font-size:13px;color:#636E72;line-height:1.5;">
-      Si vous pensez avoir reçu cet email par erreur, vous pouvez l'ignorer.
+      ${t.adminInviteFooter}
     </p>
   `;
 
   return {
-    subject: `Vérifiez votre identité — ${data.appName}`,
-    html: wrapInLayout(content, `Un administrateur de ${data.appName} vous invite à vérifier votre identité.`),
+    subject: t.adminInviteSubject(data.appName),
+    html: wrapInLayout(content, t.adminInvitePreview(data.appName), locale),
   };
 }

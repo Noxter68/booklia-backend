@@ -1,6 +1,8 @@
 // Shared HTML email layout for all Booklia transactional emails.
 // Uses inline styles for maximum email client compatibility.
 
+import { getEmailTranslations, type EmailLocale } from './i18n';
+
 const BRAND_COLOR = '#1A1A1A';
 const BRAND_COLOR_DARK = '#000000';
 const TEXT_COLOR = '#2D3436';
@@ -11,10 +13,17 @@ const CARD_BG = '#FFFFFF';
 /**
  * Wraps email content in the Booklia branded layout (header + footer).
  */
-export function wrapInLayout(content: string, previewText: string): string {
+export function wrapInLayout(
+  content: string,
+  previewText: string,
+  locale: string = 'fr',
+): string {
+  const t = getEmailTranslations(locale);
+  const langAttr = locale === 'pt' ? 'pt-BR' : locale;
+
   return `
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="${langAttr}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -62,10 +71,10 @@ export function wrapInLayout(content: string, previewText: string): string {
           <tr>
             <td align="center" style="padding:24px 0 0;">
               <p style="margin:0 0 8px;font-size:13px;color:${TEXT_MUTED};">
-                Cet email a été envoyé automatiquement par Booklia.
+                ${t.autoEmail}
               </p>
               <p style="margin:0;font-size:13px;color:${TEXT_MUTED};">
-                &copy; ${new Date().getFullYear()} Booklia. Tous droits réservés.
+                &copy; ${new Date().getFullYear()} Booklia. ${t.allRightsReserved}
               </p>
             </td>
           </tr>

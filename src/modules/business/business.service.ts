@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UploadService } from '../upload/upload.service';
@@ -107,7 +108,7 @@ export class BusinessService {
           where: { isActive: true },
           include: {
             category: true,
-            businessCategory: true,
+            businessCategory: { include: { options: true } },
           },
         },
         hours: {
@@ -115,6 +116,13 @@ export class BusinessService {
         },
         categories: {
           orderBy: { sortOrder: 'asc' },
+          include: {
+            _count: { select: { services: true } },
+            options: {
+              where: { isActive: true },
+              orderBy: [{ groupName: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+            },
+          },
         },
         images: {
           orderBy: { sortOrder: 'asc' },
@@ -153,7 +161,7 @@ export class BusinessService {
           where: { isActive: true },
           include: {
             category: true,
-            businessCategory: true,
+            businessCategory: { include: { options: true } },
           },
         },
         hours: {
@@ -161,6 +169,13 @@ export class BusinessService {
         },
         categories: {
           orderBy: { sortOrder: 'asc' },
+          include: {
+            _count: { select: { services: true } },
+            options: {
+              where: { isActive: true },
+              orderBy: [{ groupName: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+            },
+          },
         },
         images: {
           orderBy: { sortOrder: 'asc' },
@@ -204,7 +219,7 @@ export class BusinessService {
           where: { isActive: true },
           include: {
             category: true,
-            businessCategory: true,
+            businessCategory: { include: { options: true } },
           },
         },
         hours: {
@@ -212,6 +227,13 @@ export class BusinessService {
         },
         categories: {
           orderBy: { sortOrder: 'asc' },
+          include: {
+            _count: { select: { services: true } },
+            options: {
+              where: { isActive: true },
+              orderBy: [{ groupName: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+            },
+          },
         },
         images: {
           orderBy: { sortOrder: 'asc' },
@@ -399,6 +421,10 @@ export class BusinessService {
             where: { isActive: true },
             take: 3,
           },
+          images: {
+            orderBy: { sortOrder: 'asc' },
+            take: 5,
+          },
           _count: {
             select: {
               employees: { where: { isActive: true } },
@@ -486,6 +512,10 @@ export class BusinessService {
       include: {
         owner: { select: { name: true } },
         services: { where: { isActive: true }, take: 3 },
+        images: {
+          orderBy: { sortOrder: 'asc' },
+          take: 5,
+        },
         _count: {
           select: {
             employees: { where: { isActive: true } },
@@ -552,6 +582,7 @@ export class BusinessService {
       },
       include: {
         category: true,
+        businessCategory: { include: { options: true } },
       },
     });
 
@@ -585,6 +616,7 @@ export class BusinessService {
       data: dto,
       include: {
         category: true,
+        businessCategory: { include: { options: true } },
       },
     });
 
@@ -627,6 +659,7 @@ export class BusinessService {
             employee: true,
           },
         },
+        businessCategory: { include: { options: true } },
       },
     });
   }
@@ -701,6 +734,10 @@ export class BusinessService {
         _count: {
           select: { services: true },
         },
+        options: {
+          where: { isActive: true },
+          orderBy: [{ groupName: 'asc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+        },
       },
     });
   }
@@ -725,7 +762,20 @@ export class BusinessService {
         businessId: business.id,
         name: dto.name,
         sortOrder: dto.sortOrder ?? (maxSort._max.sortOrder ?? 0) + 1,
+        options: dto.options?.length
+          ? {
+              create: dto.options.map((opt, i) => ({
+                name: opt.name,
+                description: opt.description,
+                priceCents: opt.priceCents,
+                durationMinutes: opt.durationMinutes,
+                groupName: opt.groupName,
+                sortOrder: opt.sortOrder ?? i,
+              })),
+            }
+          : undefined,
       },
+      include: { options: true },
     });
 
     await this.invalidateBusinessCache(business.slug);
@@ -747,15 +797,65 @@ export class BusinessService {
 
     const category = await this.prisma.businessCategory.findUnique({
       where: { id: categoryId },
+      include: { options: { select: { id: true } } },
     });
 
     if (!category || category.businessId !== business.id) {
       throw new ForbiddenException('Accès refusé');
     }
 
-    const updated = await this.prisma.businessCategory.update({
-      where: { id: categoryId },
-      data: dto,
+    const { options, ...scalarUpdates } = dto;
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (options !== undefined) {
+        // Diff current vs incoming options: update existing, create new, delete missing
+        const existingIds = new Set(category.options.map((o) => o.id));
+        const incomingIds = new Set(options.filter((o) => o.id).map((o) => o.id!));
+
+        // Delete options not present in the new list
+        const toDelete = [...existingIds].filter((id) => !incomingIds.has(id));
+        if (toDelete.length) {
+          await tx.serviceOption.deleteMany({
+            where: { id: { in: toDelete }, businessCategoryId: categoryId },
+          });
+        }
+
+        // Upsert each incoming option
+        for (let i = 0; i < options.length; i++) {
+          const opt = options[i];
+          if (opt.id && existingIds.has(opt.id)) {
+            await tx.serviceOption.update({
+              where: { id: opt.id },
+              data: {
+                name: opt.name,
+                description: opt.description,
+                priceCents: opt.priceCents,
+                durationMinutes: opt.durationMinutes,
+                groupName: opt.groupName,
+                sortOrder: opt.sortOrder ?? i,
+              },
+            });
+          } else {
+            await tx.serviceOption.create({
+              data: {
+                businessCategoryId: categoryId,
+                name: opt.name,
+                description: opt.description,
+                priceCents: opt.priceCents,
+                durationMinutes: opt.durationMinutes,
+                groupName: opt.groupName,
+                sortOrder: opt.sortOrder ?? i,
+              },
+            });
+          }
+        }
+      }
+
+      return tx.businessCategory.update({
+        where: { id: categoryId },
+        data: scalarUpdates,
+        include: { options: true },
+      });
     });
 
     await this.invalidateBusinessCache(business.slug);
@@ -1039,4 +1139,5 @@ export class BusinessService {
 
     return { success: true };
   }
+
 }

@@ -2,10 +2,11 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CacheService } from '../cache/cache.service';
-import { UpdateBusinessClientDto } from './dto/client.dto';
+import { CreateBusinessClientDto, UpdateBusinessClientDto } from './dto/client.dto';
 
 export type ClientTrustLevel = 'fiable' | 'peu_fiable' | 'attention';
 
@@ -37,6 +38,51 @@ export class ClientsService {
       create: { businessId, userId },
       update: {},
     });
+  }
+
+  /**
+   * Manually create a client from the dashboard.
+   * Creates or finds a User by email, then creates a BusinessClient.
+   */
+  async createClient(businessId: string, dto: CreateBusinessClientDto) {
+    // Find or create user by email
+    let user = await this.prisma.user.findUnique({
+      where: { email: dto.email.toLowerCase().trim() },
+    });
+
+    if (!user) {
+      user = await this.prisma.user.create({
+        data: {
+          email: dto.email.toLowerCase().trim(),
+          name: dto.name.trim(),
+        },
+      });
+    }
+
+    // Check if already a client of this business
+    const existing = await this.prisma.businessClient.findUnique({
+      where: { businessId_userId: { businessId, userId: user.id } },
+    });
+
+    if (existing) {
+      throw new BadRequestException('Ce client existe déjà pour votre établissement');
+    }
+
+    // Create the BusinessClient
+    const client = await this.prisma.businessClient.create({
+      data: {
+        businessId,
+        userId: user.id,
+        phone: dto.phone || null,
+        address: dto.address || null,
+        notes: dto.notes || null,
+      },
+      include: {
+        user: { select: { id: true, name: true, email: true, image: true } },
+      },
+    });
+
+    return client;
   }
 
   /**

@@ -297,9 +297,34 @@ model BusinessCategory {
   // Relations
   business Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
   services BusinessService[]
+  options  ServiceOption[]
 
   @@unique([businessId, name])
   @@index([businessId])
+}
+
+// Options attached to a BusinessCategory. Services created in that category
+// can opt-in to any of these options. Options with the same non-null groupName
+// form a radio group (single choice); options without groupName are free checkboxes.
+model ServiceOption {
+  id                 String  @id @default(cuid())
+  businessCategoryId String
+  name               String
+  description        String? // optional short description shown to clients
+  priceCents         Int     @default(0) // delta added on top of service price
+  durationMinutes    Int?    // optional extra duration (not used for now)
+  groupName          String? // options sharing the same group are mutually exclusive
+  sortOrder          Int     @default(0)
+  isActive           Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  businessCategory BusinessCategory @relation(fields: [businessCategoryId], references: [id], onDelete: Cascade)
+  bookingOptions   BookingOption[]
+
+  @@index([businessCategoryId])
 }
 
 model BusinessService {
@@ -421,6 +446,7 @@ model Booking {
   reviews         Review[]
   bookingNote     BookingNote?
   invoice         Invoice?
+  options         BookingOption[]
 
   @@index([businessServiceId])
   @@index([employeeId])
@@ -429,6 +455,23 @@ model Booking {
   @@index([status])
   @@index([scheduledAt])
   @@index([employeeId, scheduledAt])
+}
+
+// Snapshot of options selected at booking time. Keeps name + price frozen
+// so edits/deletes to ServiceOption don't retroactively change past bookings.
+model BookingOption {
+  id              String @id @default(cuid())
+  bookingId       String
+  serviceOptionId String? // nullable so option deletion doesn't cascade-delete history
+  name            String
+  priceCents      Int
+
+  createdAt DateTime @default(now())
+
+  booking       Booking        @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  serviceOption ServiceOption? @relation(fields: [serviceOptionId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
 }
 
 // ============================================

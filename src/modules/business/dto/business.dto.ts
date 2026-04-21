@@ -316,6 +316,39 @@ export class UpdateBusinessHoursDto {
 // BUSINESS CATEGORIES
 // ============================================
 
+export class CategoryOptionInputDto {
+  // If present, update the existing option with this id (must belong to the category)
+  @IsString()
+  @IsOptional()
+  id?: string;
+
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  name: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  description?: string;
+
+  @IsNumber()
+  priceCents: number;
+
+  @IsNumber()
+  @IsOptional()
+  durationMinutes?: number;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  groupName?: string;
+
+  @IsNumber()
+  @IsOptional()
+  sortOrder?: number;
+}
+
 export class CreateBusinessCategoryDto {
   @IsString()
   @MinLength(2)
@@ -325,6 +358,12 @@ export class CreateBusinessCategoryDto {
   @IsNumber()
   @IsOptional()
   sortOrder?: number;
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => CategoryOptionInputDto)
+  options?: CategoryOptionInputDto[];
 }
 
 export class UpdateBusinessCategoryDto {
@@ -337,6 +376,14 @@ export class UpdateBusinessCategoryDto {
   @IsNumber()
   @IsOptional()
   sortOrder?: number;
+
+  // Full replacement of options. Entries with `id` are updated; without id = created;
+  // existing options missing from this list are deleted.
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => CategoryOptionInputDto)
+  options?: CategoryOptionInputDto[];
 }
 
 // ============================================
@@ -431,3 +478,4 @@ export class UpdateBusinessPromotionDto {
   @IsOptional()
   isActive?: boolean;
 }
+

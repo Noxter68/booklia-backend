@@ -27,12 +27,15 @@ export class BookingsService {
   ) {}
 
   async create(userId: string, dto: CreateBookingDto) {
-    // Fetch business service
+    // Fetch business service with its category's allowed options
     const businessService = await this.prisma.businessService.findUnique({
       where: { id: dto.businessServiceId },
       include: {
         business: {
           include: { owner: true },
+        },
+        businessCategory: {
+          include: { options: true },
         },
       },
     });
@@ -75,12 +78,51 @@ export class BookingsService {
       );
     }
 
-    // Calculate scheduledEndAt based on service duration
+    // Validate selected options: each must belong to the service's category, be active,
+    // and respect the "one per group" rule for grouped options.
+    const selectedIds = dto.selectedOptionIds ?? [];
+    const allowedOptions = (businessService.businessCategory?.options ?? []).filter(
+      (opt) => opt.isActive,
+    );
+    const allowedMap = new Map(allowedOptions.map((o) => [o.id, o]));
+    const selectedOptions: typeof allowedOptions = [];
+    const seenGroups = new Set<string>();
+    for (const id of selectedIds) {
+      const opt = allowedMap.get(id);
+      if (!opt) {
+        throw new BadRequestException(
+          'Option non disponible pour cette prestation',
+        );
+      }
+      if (opt.groupName) {
+        if (seenGroups.has(opt.groupName)) {
+          throw new BadRequestException(
+            `Une seule option autorisée pour le groupe ${opt.groupName}`,
+          );
+        }
+        seenGroups.add(opt.groupName);
+      }
+      selectedOptions.push(opt);
+    }
+
+    const optionsTotalCents = selectedOptions.reduce(
+      (sum, o) => sum + o.priceCents,
+      0,
+    );
+    const optionsTotalMinutes = selectedOptions.reduce(
+      (sum, o) => sum + (o.durationMinutes ?? 0),
+      0,
+    );
+    const totalDurationMinutes =
+      businessService.durationMinutes + optionsTotalMinutes;
+    const totalPriceCents = businessService.priceCents + optionsTotalCents;
+
+    // Calculate scheduledEndAt based on total duration (service + options)
     let scheduledAt: Date | undefined;
     let scheduledEndAt: Date | undefined;
     if (dto.scheduledAt) {
       scheduledAt = new Date(dto.scheduledAt);
-      scheduledEndAt = new Date(scheduledAt.getTime() + businessService.durationMinutes * 60000);
+      scheduledEndAt = new Date(scheduledAt.getTime() + totalDurationMinutes * 60000);
     }
 
     // Check if business has auto-accept enabled
@@ -93,10 +135,19 @@ export class BookingsService {
         providerId: businessService.business.ownerId,
         businessServiceId: dto.businessServiceId,
         employeeId: dto.employeeId,
-        agreedPriceCents: businessService.priceCents,
+        agreedPriceCents: totalPriceCents,
         scheduledAt,
         scheduledEndAt,
         ...(autoAccept && { status: BookingStatus.ACCEPTED }),
+        options: selectedOptions.length
+          ? {
+              create: selectedOptions.map((opt) => ({
+                serviceOptionId: opt.id,
+                name: opt.name,
+                priceCents: opt.priceCents,
+              })),
+            }
+          : undefined,
       },
       include: {
         businessService: {
@@ -117,6 +168,7 @@ export class BookingsService {
             name: true,
           },
         },
+        options: true,
       },
     });
 
@@ -433,6 +485,7 @@ export class BookingsService {
           },
         },
         reviews: true,
+        options: true,
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -461,6 +514,7 @@ export class BookingsService {
           },
         },
         reviews: true,
+        options: true,
       },
     });
   }

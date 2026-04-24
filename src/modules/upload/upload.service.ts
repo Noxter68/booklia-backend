@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { randomUUID } from 'crypto';
 
 @Injectable()
@@ -84,6 +84,24 @@ export class UploadService {
       console.error('Upload buffer error:', error);
       throw new BadRequestException('Failed to upload file');
     }
+  }
+
+  async downloadBuffer(key: string): Promise<Buffer> {
+    const res = await this.s3Client.send(
+      new GetObjectCommand({
+        Bucket: this.bucketName,
+        Key: key,
+      }),
+    );
+    if (!res.Body) {
+      throw new BadRequestException('File not found');
+    }
+    const chunks: Buffer[] = [];
+    const stream = res.Body as NodeJS.ReadableStream;
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
   }
 
   async deleteFile(key: string): Promise<void> {

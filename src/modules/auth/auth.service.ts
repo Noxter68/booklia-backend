@@ -1,8 +1,9 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, HttpException, HttpStatus } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
+import { CacheService } from '../cache/cache.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -17,6 +18,7 @@ export class AuthService {
     private jwtService: JwtService,
     private configService: ConfigService,
     private emailService: EmailService,
+    private cacheService: CacheService,
   ) {
     this.frontendUrl =
       configService.get<string>('FRONTEND_URL') || 'http://localhost:3000';
@@ -156,6 +158,43 @@ export class AuthService {
     return this.prisma.user.findUnique({
       where: { id: userId },
     });
+  }
+
+  /**
+   * Verifies the current user's password without issuing a new session.
+   * Used for sensitive actions (e.g., revealing hidden financial amounts).
+   * Rate-limited to 5 attempts per 15 minutes per user (soft-fails if Redis
+   * is unavailable — bcrypt remains the main cost guard).
+   */
+  async verifyPassword(userId: string, password: string) {
+    const rateKey = `verify-password:attempts:${userId}`;
+    const maxAttempts = 5;
+    const windowSeconds = 15 * 60;
+
+    const attempts = (await this.cacheService.get<number>(rateKey)) ?? 0;
+    if (attempts >= maxAttempts) {
+      throw new HttpException(
+        'Trop de tentatives. Réessayez dans quelques minutes.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    const account = await this.prisma.account.findFirst({
+      where: { userId, providerId: 'credentials' },
+    });
+
+    if (!account || !account.password) {
+      throw new UnauthorizedException('Compte non trouvé');
+    }
+
+    const isValid = await bcrypt.compare(password, account.password);
+    if (!isValid) {
+      await this.cacheService.set(rateKey, attempts + 1, windowSeconds);
+      throw new UnauthorizedException('Mot de passe incorrect');
+    }
+
+    await this.cacheService.del(rateKey);
+    return { valid: true };
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {

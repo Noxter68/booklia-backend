@@ -289,6 +289,7 @@ export class ClientsService {
       include: {
         businessService: { select: { name: true, priceCents: true, durationMinutes: true } },
         employee: { select: { firstName: true, lastName: true } },
+        invoice: { select: { id: true, status: true, emailSentAt: true, invoiceNumber: true } },
       },
       orderBy: { createdAt: 'desc' },
     });

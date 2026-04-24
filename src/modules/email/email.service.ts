@@ -24,6 +24,10 @@ import {
   AdminInvitationData,
   buildAdminInvitationEmail,
 } from './templates/admin-invitation';
+import {
+  InvoiceSentData,
+  buildInvoiceSentEmail,
+} from './templates/invoice-sent';
 
 @Injectable()
 export class EmailService {
@@ -66,6 +70,40 @@ export class EmailService {
     } catch (err) {
       this.logger.error(`Unexpected error sending email to ${to}`, err);
     }
+  }
+
+  /**
+   * Sends an email with a single file attachment. Throws on failure so callers
+   * can surface the error to the user (e.g., invoice-send button).
+   */
+  private async sendWithAttachment(
+    to: string,
+    subject: string,
+    html: string,
+    attachment: { filename: string; content: Buffer },
+  ): Promise<void> {
+    const { error } = await this.resend.emails.send({
+      from: this.fromEmail,
+      to,
+      subject,
+      html,
+      attachments: [
+        {
+          filename: attachment.filename,
+          content: attachment.content,
+        },
+      ],
+    });
+
+    if (error) {
+      this.logger.error(
+        `Failed to send email with attachment to ${to}: ${error.message}`,
+        error,
+      );
+      throw new Error(error.message || 'Email delivery failed');
+    }
+
+    this.logger.log(`Email with attachment sent to ${to}: "${subject}"`);
   }
 
   /** Sends a booking confirmation email to the client. */
@@ -111,5 +149,18 @@ export class EmailService {
   ): Promise<void> {
     const { subject, html } = buildAdminInvitationEmail(data);
     await this.send(to, subject, html);
+  }
+
+  /**
+   * Sends an invoice to the client with the PDF attached. Throws on delivery
+   * failure so the caller can report it to the user.
+   */
+  async sendInvoiceToClient(
+    to: string,
+    data: InvoiceSentData,
+    pdf: { filename: string; content: Buffer },
+  ): Promise<void> {
+    const { subject, html } = buildInvoiceSentEmail(data);
+    await this.sendWithAttachment(to, subject, html, pdf);
   }
 }

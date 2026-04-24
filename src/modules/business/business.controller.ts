@@ -10,6 +10,7 @@ import {
   UseGuards,
   Req,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { BusinessService } from './business.service';
 import {
   CreateBusinessDto,
@@ -51,6 +52,7 @@ export class BusinessController {
   }
 
   @Get('search')
+  @Throttle({ default: { ttl: 60_000, limit: 60 } })
   search(@Query() dto: SearchBusinessDto) {
     return this.businessService.search(dto);
   }

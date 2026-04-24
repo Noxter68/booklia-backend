@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { PrismaModule } from './prisma/prisma.module';
 import { CacheModule } from './modules/cache/cache.module';
 import { AuthModule } from './modules/auth/auth.module';
@@ -29,6 +31,14 @@ import { InvoicesModule } from './modules/invoices/invoices.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    // Global throttler with per-endpoint overrides via @Throttle on sensitive routes.
+    // The "default" limit is lax (120 req/min per IP) so normal dashboard usage
+    // isn't throttled; auth and booking-create use their own stricter limits.
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60_000, limit: 120 },
+      { name: 'auth', ttl: 60_000, limit: 10 },
+      { name: 'booking', ttl: 60_000, limit: 20 },
+    ]),
     ScheduleModule.forRoot(),
     PrismaModule,
     CacheModule,
@@ -50,6 +60,9 @@ import { InvoicesModule } from './modules/invoices/invoices.module';
     BookingNotesModule,
     BillingModule,
     InvoicesModule,
+  ],
+  providers: [
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}

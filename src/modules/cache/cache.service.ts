@@ -161,4 +161,23 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
   isAvailable(): boolean {
     return this.isConnected && this.redis !== null;
   }
+
+  /**
+   * Atomically acquire a named lock with a TTL (leader election for cron jobs).
+   * Returns true if the lock was acquired by this caller.
+   *
+   * If Redis is unavailable, returns true (fail-open): the cron still runs,
+   * but may duplicate work until Redis is restored. Downstream jobs must stay
+   * idempotent. Without Redis we don't have a way to coordinate replicas.
+   */
+  async acquireLock(key: string, ttlSeconds: number): Promise<boolean> {
+    if (!this.redis || !this.isConnected) return true;
+    try {
+      const result = await this.redis.set(key, '1', 'EX', ttlSeconds, 'NX');
+      return result === 'OK';
+    } catch (error) {
+      this.logger.error(`Lock acquire error for ${key}:`, error);
+      return true;
+    }
+  }
 }

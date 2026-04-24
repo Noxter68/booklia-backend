@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { BookingsService } from './bookings.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -20,6 +21,7 @@ export class BookingsController {
   constructor(private bookingsService: BookingsService) {}
 
   @Post()
+  @Throttle({ booking: { ttl: 60_000, limit: 10 } })
   async create(@CurrentUser() user: User, @Body() dto: CreateBookingDto) {
     return this.bookingsService.create(user.id, dto);
   }

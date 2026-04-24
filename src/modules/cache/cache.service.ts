@@ -10,7 +10,9 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
 
   // Default TTL values in seconds
   static readonly TTL = {
-    SEARCH: 60, // 1 minute for search results
+    SEARCH: 300, // 5 minutes — search results change slowly; 5 min is an
+                 // acceptable staleness window for a freshly updated business
+                 // to appear, and buys a much higher cache hit rate.
     CATEGORIES: 300, // 5 minutes for categories
     BUSINESS_PAGE: 120, // 2 minutes for business pages
     SERVICES: 180, // 3 minutes for services list

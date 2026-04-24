@@ -171,6 +171,7 @@ model Business {
 
   @@index([city])
   @@index([categoryId])
+  @@index([latitude, longitude])
 }
 
 model BusinessPromotion {

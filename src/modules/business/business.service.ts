@@ -30,10 +30,11 @@ export class BusinessService {
   ) {}
 
   private async invalidateBusinessCache(slug: string) {
-    await Promise.all([
-      this.cacheService.del(CacheService.businessKey(slug)),
-      this.cacheService.delByPattern('search:business:*'),
-    ]);
+    // Only invalidate the precise slug key; search results stay cached until
+    // their 5 min TTL expires. A freshly edited business appearing in a
+    // result list with slightly stale name/phone for a few minutes is an
+    // acceptable tradeoff to keep the search cache hit rate high.
+    await this.cacheService.del(CacheService.businessKey(slug));
   }
 
   private generateSlug(name: string): string {
@@ -82,9 +83,6 @@ export class BusinessService {
         },
       },
     });
-
-    // Invalidate search cache
-    await this.cacheService.delByPattern('search:business:*');
 
     return business;
   }
@@ -506,7 +504,13 @@ export class BusinessService {
       });
     }
 
-    // Get all matching businesses within bounding box
+    // Fetch a bounded candidate set from the bounding box. We can't apply
+    // Haversine inside SQL here (would need PostGIS), so we cap at 5x the
+    // requested page size with a hard ceiling — enough margin to absorb
+    // the bounding-box corners trimmed by Haversine without loading the
+    // whole city when the query matches thousands of businesses.
+    const candidateLimit = Math.min(Math.max(limit * 5, 100), 200);
+
     const candidates = await this.prisma.business.findMany({
       where,
       include: {
@@ -523,6 +527,10 @@ export class BusinessService {
           },
         },
       },
+      // Pre-sort cheaply by (lat, lng) so the top candidates are geographically
+      // clustered around the bounding box — keeps the fetched set relevant.
+      orderBy: [{ latitude: 'asc' }, { longitude: 'asc' }],
+      take: candidateLimit,
     });
 
     // Calculate actual distance using Haversine formula and filter

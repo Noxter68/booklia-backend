@@ -98,6 +98,8 @@ export class ClientsService {
 
   /**
    * Get all clients for a business, with computed stats.
+   * Fetches all bookings in a single query and aggregates per-client in
+   * memory to avoid N+1 (previously one query per client).
    */
   async getClientsForBusiness(businessId: string, search?: string) {
     const business = await this.prisma.business.findUnique({
@@ -130,18 +132,109 @@ export class ClientsService {
       orderBy: { createdAt: 'desc' },
     });
 
-    const clientsWithStats = await Promise.all(
-      clients.map(async (client) => {
-        const stats = await this.getClientStats(
-          businessId,
-          client.userId,
-          business.ownerId,
-        );
-        return { ...client, stats };
-      }),
-    );
+    if (clients.length === 0) {
+      return [];
+    }
 
-    return clientsWithStats;
+    const clientUserIds = clients.map((c) => c.userId);
+
+    const bookings = await this.prisma.booking.findMany({
+      where: {
+        requesterId: { in: clientUserIds },
+        providerId: business.ownerId,
+        businessService: { businessId },
+      },
+      select: {
+        requesterId: true,
+        status: true,
+        agreedPriceCents: true,
+        canceledById: true,
+        businessService: { select: { name: true } },
+        createdAt: true,
+      },
+    });
+
+    const bookingsByClient = new Map<string, typeof bookings>();
+    for (const b of bookings) {
+      const bucket = bookingsByClient.get(b.requesterId) ?? [];
+      bucket.push(b);
+      bookingsByClient.set(b.requesterId, bucket);
+    }
+
+    return clients.map((client) => ({
+      ...client,
+      stats: this.computeClientStats(
+        bookingsByClient.get(client.userId) ?? [],
+        client.userId,
+      ),
+    }));
+  }
+
+  /**
+   * Pure stat aggregation from a pre-fetched booking list.
+   * Shared between list (batch fetch) and single-client (cached) paths.
+   */
+  private computeClientStats(
+    bookings: Array<{
+      status: string;
+      agreedPriceCents: number | null;
+      canceledById: string | null;
+      businessService: { name: string } | null;
+      createdAt: Date;
+    }>,
+    clientUserId: string,
+  ): ClientStats {
+    const totalBookings = bookings.length;
+    const completedBookings = bookings.filter(
+      (b) => b.status === 'COMPLETED',
+    ).length;
+    const canceledByClient = bookings.filter(
+      (b) => b.status === 'CANCELED' && b.canceledById === clientUserId,
+    ).length;
+    const totalRevenueCents = bookings
+      .filter((b) => b.status === 'COMPLETED')
+      .reduce((sum, b) => sum + (b.agreedPriceCents || 0), 0);
+
+    const servicesUsed = [
+      ...new Set(
+        bookings
+          .map((b) => b.businessService?.name)
+          .filter((n): n is string => !!n),
+      ),
+    ];
+
+    const resolvedBookings = completedBookings + canceledByClient;
+    const completionRate =
+      resolvedBookings > 0 ? completedBookings / resolvedBookings : 1;
+
+    let trustLevel: ClientTrustLevel;
+    if (resolvedBookings < 2) {
+      trustLevel = 'fiable';
+    } else if (completionRate >= 0.8) {
+      trustLevel = 'fiable';
+    } else if (completionRate >= 0.5) {
+      trustLevel = 'peu_fiable';
+    } else {
+      trustLevel = 'attention';
+    }
+
+    const lastBookingAt =
+      bookings.length > 0
+        ? [...bookings].sort(
+            (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
+          )[0].createdAt
+        : null;
+
+    return {
+      totalBookings,
+      completedBookings,
+      canceledByClient,
+      totalRevenueCents,
+      servicesUsed,
+      completionRate,
+      trustLevel,
+      lastBookingAt,
+    };
   }
 
   /**
@@ -172,55 +265,7 @@ export class ClientsService {
       },
     });
 
-    const totalBookings = bookings.length;
-    const completedBookings = bookings.filter(
-      (b) => b.status === 'COMPLETED',
-    ).length;
-    const canceledByClient = bookings.filter(
-      (b) => b.status === 'CANCELED' && b.canceledById === clientUserId,
-    ).length;
-    const totalRevenueCents = bookings
-      .filter((b) => b.status === 'COMPLETED')
-      .reduce((sum, b) => sum + (b.agreedPriceCents || 0), 0);
-
-    const servicesUsed = [
-      ...new Set(bookings.map((b) => b.businessService!.name)),
-    ];
-
-    // Only count resolved bookings (COMPLETED + CANCELED) for trust calculation
-    // PENDING/ACCEPTED bookings shouldn't penalize the client
-    const resolvedBookings = completedBookings + canceledByClient;
-    const completionRate =
-      resolvedBookings > 0 ? completedBookings / resolvedBookings : 1;
-
-    let trustLevel: ClientTrustLevel;
-    if (resolvedBookings < 2) {
-      trustLevel = 'fiable';
-    } else if (completionRate >= 0.8) {
-      trustLevel = 'fiable';
-    } else if (completionRate >= 0.5) {
-      trustLevel = 'peu_fiable';
-    } else {
-      trustLevel = 'attention';
-    }
-
-    const lastBookingAt =
-      bookings.length > 0
-        ? bookings.sort(
-            (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
-          )[0].createdAt
-        : null;
-
-    const stats: ClientStats = {
-      totalBookings,
-      completedBookings,
-      canceledByClient,
-      totalRevenueCents,
-      servicesUsed,
-      completionRate,
-      trustLevel,
-      lastBookingAt,
-    };
+    const stats = this.computeClientStats(bookings, clientUserId);
 
     await this.cacheService.set(
       cacheKey,

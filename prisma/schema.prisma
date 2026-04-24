@@ -491,6 +491,8 @@ model Booking {
   @@index([status])
   @@index([scheduledAt])
   @@index([employeeId, scheduledAt])
+  @@index([requesterId, providerId])
+  @@index([status, scheduledAt])
 }
 
 // Snapshot of options selected at booking time. Keeps name + price frozen
@@ -534,6 +536,7 @@ model Notification {
   @@index([userId])
   @@index([isRead])
   @@index([createdAt])
+  @@index([userId, isRead])
 }
 
 // ============================================
@@ -719,6 +722,7 @@ model Invoice {
 
   @@unique([businessId, invoiceNumber])
   @@index([businessId, createdAt])
+  @@index([businessId, status])
 }
 
 model InvoiceLine {

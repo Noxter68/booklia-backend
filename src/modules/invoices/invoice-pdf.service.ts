@@ -1,28 +1,108 @@
-import { Injectable } from '@nestjs/common';
-import puppeteer from 'puppeteer';
+import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import puppeteer, { Browser } from 'puppeteer';
 
+/**
+ * Generates invoice PDFs with a single long-lived Puppeteer browser shared
+ * across the whole process. Spawning a browser per request costs 300-500 MB
+ * and kills Railway containers when multiple invoices are generated in a
+ * batch; here we reuse one browser and open a fresh page per call.
+ *
+ * A small concurrency gate prevents page-creation storms when a batch triggers
+ * dozens of parallel generations.
+ */
 @Injectable()
-export class InvoicePdfService {
+export class InvoicePdfService implements OnModuleDestroy {
+  private readonly logger = new Logger(InvoicePdfService.name);
+  private browser: Browser | null = null;
+  private launching: Promise<Browser> | null = null;
+
+  private readonly maxConcurrent = 3;
+  private active = 0;
+  private readonly waiters: Array<() => void> = [];
+
+  async onModuleDestroy() {
+    if (this.browser) {
+      try {
+        await this.browser.close();
+      } catch (err) {
+        this.logger.warn(`Error closing Puppeteer browser: ${err}`);
+      }
+      this.browser = null;
+    }
+  }
+
   async generatePdf(snapshot: any): Promise<Buffer> {
     const html = this.buildHtml(snapshot);
-
-    const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-
+    await this.acquire();
     try {
+      const browser = await this.getBrowser();
       const page = await browser.newPage();
-      await page.setContent(html, { waitUntil: 'networkidle0' });
-      const pdfBuffer = await page.pdf({
-        format: 'A4',
-        printBackground: true,
-        margin: { top: '20mm', right: '15mm', bottom: '20mm', left: '15mm' },
-      });
-      return Buffer.from(pdfBuffer);
+      try {
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+        const pdfBuffer = await page.pdf({
+          format: 'A4',
+          printBackground: true,
+          margin: { top: '20mm', right: '15mm', bottom: '20mm', left: '15mm' },
+        });
+        return Buffer.from(pdfBuffer);
+      } finally {
+        await page.close().catch(() => undefined);
+      }
     } finally {
-      await browser.close();
+      this.release();
     }
+  }
+
+  private async getBrowser(): Promise<Browser> {
+    if (this.browser && this.browser.connected) {
+      return this.browser;
+    }
+
+    // If another call is already launching, reuse that promise.
+    if (this.launching) {
+      return this.launching;
+    }
+
+    this.launching = puppeteer
+      .launch({
+        headless: true,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+        ],
+      })
+      .then((b) => {
+        this.browser = b;
+        // Auto-recover if the browser dies (OOM, crash, etc.) — next call will relaunch.
+        b.on('disconnected', () => {
+          this.logger.warn('Puppeteer browser disconnected, will relaunch on next call');
+          this.browser = null;
+        });
+        this.logger.log('Puppeteer browser launched');
+        return b;
+      })
+      .finally(() => {
+        this.launching = null;
+      });
+
+    return this.launching;
+  }
+
+  private async acquire(): Promise<void> {
+    if (this.active < this.maxConcurrent) {
+      this.active++;
+      return;
+    }
+    await new Promise<void>((resolve) => this.waiters.push(resolve));
+    this.active++;
+  }
+
+  private release(): void {
+    this.active--;
+    const next = this.waiters.shift();
+    if (next) next();
   }
 
   private buildHtml(snapshot: any): string {

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UploadService } from '../upload/upload.service';
+import { EmailService } from '../email/email.service';
 import {
   CreateInvoiceDto,
   AddInvoiceLineDto,
@@ -17,6 +18,7 @@ export class InvoicesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly uploadService: UploadService,
+    private readonly emailService: EmailService,
   ) {}
 
   // ============================================
@@ -438,6 +440,77 @@ export class InvoicesService {
     return this.prisma.invoice.update({
       where: { id: invoiceId },
       data: { pdfKey },
+    });
+  }
+
+  /**
+   * Sends a finalized invoice to the client by email with the PDF attached.
+   * If `overrideEmail` is provided it takes precedence (used when the client
+   * on file has no email and the user supplies one via modal).
+   */
+  async sendToClient(
+    businessId: string,
+    invoiceId: string,
+    overrideEmail?: string,
+  ) {
+    const invoice = await this.prisma.invoice.findUnique({
+      where: { id: invoiceId },
+      include: {
+        client: { select: { id: true, name: true, email: true, locale: true } },
+        business: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!invoice) {
+      throw new NotFoundException('Facture non trouvée');
+    }
+    if (invoice.businessId !== businessId) {
+      throw new ForbiddenException('Accès refusé');
+    }
+    if (invoice.status !== 'FINALIZED') {
+      throw new BadRequestException(
+        'Seules les factures finalisées peuvent être envoyées',
+      );
+    }
+    if (!invoice.pdfKey) {
+      throw new BadRequestException('PDF de la facture indisponible');
+    }
+    if (!invoice.invoiceNumber || !invoice.issueDate) {
+      throw new BadRequestException('Facture incomplète');
+    }
+
+    const recipient = (overrideEmail?.trim() || invoice.client?.email || '').trim();
+    if (!recipient) {
+      throw new BadRequestException(
+        'Aucune adresse email disponible pour ce client',
+      );
+    }
+
+    const pdfBuffer = await this.uploadService.downloadBuffer(invoice.pdfKey);
+
+    await this.emailService.sendInvoiceToClient(
+      recipient,
+      {
+        clientName: invoice.client?.name || 'Client',
+        businessName: invoice.business.name,
+        invoiceNumber: invoice.invoiceNumber,
+        issueDate: invoice.issueDate,
+        totalTTCCents: invoice.totalTTCCents,
+        locale: invoice.client?.locale || 'fr',
+      },
+      {
+        filename: `${invoice.invoiceNumber}.pdf`,
+        content: pdfBuffer,
+      },
+    );
+
+    return this.prisma.invoice.update({
+      where: { id: invoiceId },
+      data: { emailSentAt: new Date() },
+      include: {
+        lines: { orderBy: { sortOrder: 'asc' } },
+        client: { select: { id: true, name: true, email: true } },
+      },
     });
   }
 

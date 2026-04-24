@@ -44,6 +44,12 @@ export class BookingsService {
       throw new NotFoundException('Business service not found');
     }
 
+    if (!businessService.business.acceptsOnlineBooking) {
+      throw new ForbiddenException(
+        'Ce salon n\'accepte pas les réservations en ligne. Contactez-le directement.',
+      );
+    }
+
     // Fetch employee
     const employee = await this.prisma.employee.findUnique({
       where: { id: dto.employeeId },

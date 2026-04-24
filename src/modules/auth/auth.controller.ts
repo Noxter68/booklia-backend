@@ -41,6 +41,15 @@ export class AuthController {
     return this.authService.changePassword(user.id, dto);
   }
 
+  @Post('verify-password')
+  @UseGuards(AuthGuard)
+  async verifyPassword(
+    @CurrentUser() user: User,
+    @Body('password') password: string,
+  ) {
+    return this.authService.verifyPassword(user.id, password);
+  }
+
   @Get('verify-email')
   async verifyEmail(@Query('token') token: string) {
     return this.authService.verifyEmail(token);

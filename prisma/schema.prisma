@@ -704,6 +704,7 @@ model Invoice {
   vatMode         VatMode       @default(FRANCHISE_293B)
   snapshot        Json?
   pdfKey          String?
+  emailSentAt     DateTime?
   createdByUserId String
 
   createdAt DateTime @default(now())

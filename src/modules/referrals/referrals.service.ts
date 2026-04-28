@@ -100,6 +100,24 @@ export class ReferralsService {
   // ============================================
 
   /**
+   * Admin sidebar badge: count PENDING referrals, optionally only those
+   * created after `since` (ISO date string from the admin's last visit).
+   */
+  async adminPendingCount(since?: string) {
+    const where: { status: 'PENDING'; createdAt?: { gt: Date } } = {
+      status: 'PENDING',
+    };
+    if (since) {
+      const date = new Date(since);
+      if (!isNaN(date.getTime())) {
+        where.createdAt = { gt: date };
+      }
+    }
+    const count = await this.prisma.referral.count({ where });
+    return { count };
+  }
+
+  /**
    * Admin: list referrals grouped by business with counters.
    * One row per business that has at least one referral.
    */

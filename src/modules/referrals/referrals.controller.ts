@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -37,6 +38,16 @@ export class AdminReferralsController {
   @Get()
   async listGroupedByBusiness() {
     return this.referralsService.adminListGroupedByBusiness();
+  }
+
+  /**
+   * Lightweight count for the admin sidebar badge. Returns the number of
+   * PENDING referrals created strictly after `since` (ISO 8601). Without
+   * `since` returns the total PENDING count.
+   */
+  @Get('pending-count')
+  async pendingCount(@Query('since') since?: string) {
+    return this.referralsService.adminPendingCount(since);
   }
 
   @Get('business/:businessId')

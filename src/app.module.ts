@@ -25,6 +25,7 @@ import { BookingNotesModule } from './modules/booking-notes/booking-notes.module
 import { BillingModule } from './modules/billing/billing.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
+import { InviteRequestsModule } from './modules/invite-requests/invite-requests.module';
 
 @Module({
   controllers: [AppController],
@@ -62,6 +63,7 @@ import { ReferralsModule } from './modules/referrals/referrals.module';
     BillingModule,
     InvoicesModule,
     ReferralsModule,
+    InviteRequestsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

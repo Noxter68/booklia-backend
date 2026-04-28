@@ -816,3 +816,20 @@ model Referral {
   @@index([businessId, createdAt])
   @@index([status, createdAt])
 }
+
+// ============================================
+// INVITE REQUESTS (closed-beta lead capture)
+// ============================================
+
+model InviteRequest {
+  id        String   @id @default(cuid())
+  firstName String
+  lastName  String
+  email     String
+  phone     String
+  notes     String? // admin-only notes
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([email])
+}

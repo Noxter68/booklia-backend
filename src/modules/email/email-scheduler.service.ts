@@ -84,7 +84,7 @@ export class EmailSchedulerService {
       const clientEmail = booking.requester.email;
       if (!clientEmail || !booking.businessService) continue;
 
-      await this.emailService.sendBookingReminder(clientEmail, {
+      const sent = await this.emailService.sendBookingReminder(clientEmail, {
         bookingId: booking.id,
         clientName: booking.requester.name || 'Client',
         businessName: booking.businessService.business.name,
@@ -99,11 +99,19 @@ export class EmailSchedulerService {
         frontendUrl: this.frontendUrl,
       });
 
-      // Mark as sent to prevent duplicate reminders
-      await this.prisma.booking.update({
-        where: { id: booking.id },
-        data: { reminderSentAt: now },
-      });
+      // Only mark as sent when delivery actually succeeded — otherwise the
+      // next tick (15 min later) will retry. The 30 min reminder window
+      // gives us two retry opportunities before the booking falls out of it.
+      if (sent) {
+        await this.prisma.booking.update({
+          where: { id: booking.id },
+          data: { reminderSentAt: now },
+        });
+      } else {
+        this.logger.warn(
+          `Reminder for booking ${booking.id} not sent — will retry on next tick`,
+        );
+      }
     }
   }
 }

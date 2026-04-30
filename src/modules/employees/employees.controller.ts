@@ -18,6 +18,7 @@ import {
   CreateEmployeeExceptionDto,
   ListEmployeeExceptionsDto,
 } from './dto/employee.dto';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '../auth/auth.guard';
 import { OptionalAuthGuard } from '../auth/optional-auth.guard';
 
@@ -36,7 +37,11 @@ export class EmployeesController {
     return this.employeesService.findByBusiness(businessId);
   }
 
+  // Slots are fetched in bursts of 7 (one per day of the visible week) every
+  // time the user navigates between weeks. Allow generous bursts on this
+  // single endpoint without loosening the global throttle.
   @Get('slots')
+  @Throttle({ default: { ttl: 10_000, limit: 60 } })
   @UseGuards(OptionalAuthGuard)
   getAvailableSlots(@Req() req: any, @Query() dto: GetAvailableSlotsDto) {
     return this.employeesService.getAvailableSlots(dto, req.user?.id ?? null);

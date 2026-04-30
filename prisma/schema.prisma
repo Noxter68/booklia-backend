@@ -401,13 +401,32 @@ model BusinessService {
   updatedAt DateTime @updatedAt
 
   // Relations
-  business  Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  employees EmployeeService[]
-  bookings  Booking[]
+  business     Business             @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  employees    EmployeeService[]
+  bookings     Booking[]
+  pricingTiers ServicePricingTier[]
 
   @@index([businessId])
   @@index([categoryId])
   @@index([businessCategoryId])
+}
+
+// Loyalty pricing tiers: progressive surcharge applied when a client returns
+// for the same service after a configured number of weeks since their last
+// COMPLETED booking. Multiple tiers can stack — the highest matching tier wins.
+model ServicePricingTier {
+  id                String          @id @default(cuid())
+  businessServiceId String
+  businessService   BusinessService @relation(fields: [businessServiceId], references: [id], onDelete: Cascade)
+
+  thresholdWeeks Int // surcharge applies when weeksSinceLast >= thresholdWeeks
+  surchargeCents Int // amount added on top of the service base price
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessServiceId, thresholdWeeks])
+  @@index([businessServiceId])
 }
 
 model EmployeeService {
@@ -467,6 +486,10 @@ model Booking {
   scheduledEndAt   DateTime? // For business bookings with duration
   completedAt      DateTime?
 
+  // Loyalty pricing trace: which tier (in weeks) was applied at booking time.
+  // Null = first booking for this service or no tier matched.
+  appliedTierWeeks Int?
+
   // Client notes
   notes String?
 
@@ -502,6 +525,8 @@ model Booking {
   @@index([employeeId, scheduledAt])
   @@index([requesterId, providerId])
   @@index([status, scheduledAt])
+  // Loyalty lookup: "last COMPLETED booking of this user for this service".
+  @@index([requesterId, businessServiceId, status, scheduledAt])
 }
 
 // Snapshot of options selected at booking time. Keeps name + price frozen

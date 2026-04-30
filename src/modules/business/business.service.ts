@@ -21,6 +21,25 @@ import {
   UpdateBusinessPromotionDto,
 } from './dto/business.dto';
 
+/**
+ * The DB has a UNIQUE(businessServiceId, thresholdWeeks) constraint that would
+ * surface as a 500. Validate up front to return a clean 400 instead.
+ */
+function assertUniqueThresholds(
+  tiers: { thresholdWeeks: number }[] | undefined,
+): void {
+  if (!tiers || tiers.length === 0) return;
+  const seen = new Set<number>();
+  for (const t of tiers) {
+    if (seen.has(t.thresholdWeeks)) {
+      throw new BadRequestException(
+        `Deux paliers ont la même durée (${t.thresholdWeeks} semaines)`,
+      );
+    }
+    seen.add(t.thresholdWeeks);
+  }
+}
+
 @Injectable()
 export class BusinessService {
   constructor(
@@ -107,6 +126,7 @@ export class BusinessService {
           include: {
             category: true,
             businessCategory: { include: { options: true } },
+            pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
           },
         },
         hours: {
@@ -160,6 +180,7 @@ export class BusinessService {
           include: {
             category: true,
             businessCategory: { include: { options: true } },
+            pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
           },
         },
         hours: {
@@ -218,6 +239,7 @@ export class BusinessService {
           include: {
             category: true,
             businessCategory: { include: { options: true } },
+            pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
           },
         },
         hours: {
@@ -583,14 +605,21 @@ export class BusinessService {
       throw new NotFoundException('Business non trouvé');
     }
 
+    const { pricingTiers, ...serviceData } = dto;
+    assertUniqueThresholds(pricingTiers);
+
     const service = await this.prisma.businessService.create({
       data: {
-        ...dto,
+        ...serviceData,
         businessId: business.id,
+        ...(pricingTiers && pricingTiers.length > 0
+          ? { pricingTiers: { create: pricingTiers } }
+          : {}),
       },
       include: {
         category: true,
         businessCategory: { include: { options: true } },
+        pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
       },
     });
 
@@ -619,13 +648,35 @@ export class BusinessService {
       throw new ForbiddenException('Accès refusé');
     }
 
-    const updated = await this.prisma.businessService.update({
-      where: { id: serviceId },
-      data: dto,
-      include: {
-        category: true,
-        businessCategory: { include: { options: true } },
-      },
+    const { pricingTiers, ...serviceData } = dto;
+    assertUniqueThresholds(pricingTiers);
+
+    // Full replacement of tiers when the field is provided. Skip entirely when
+    // undefined so callers can update a service without touching its tiers.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (pricingTiers !== undefined) {
+        await tx.servicePricingTier.deleteMany({
+          where: { businessServiceId: serviceId },
+        });
+        if (pricingTiers.length > 0) {
+          await tx.servicePricingTier.createMany({
+            data: pricingTiers.map((t) => ({
+              businessServiceId: serviceId,
+              thresholdWeeks: t.thresholdWeeks,
+              surchargeCents: t.surchargeCents,
+            })),
+          });
+        }
+      }
+      return tx.businessService.update({
+        where: { id: serviceId },
+        data: serviceData,
+        include: {
+          category: true,
+          businessCategory: { include: { options: true } },
+          pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
+        },
+      });
     });
 
     await this.invalidateBusinessCache(business.slug);
@@ -668,6 +719,7 @@ export class BusinessService {
           },
         },
         businessCategory: { include: { options: true } },
+        pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
       },
     });
   }

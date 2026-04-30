@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsNumber,
   IsEnum,
+  Min,
   MinLength,
   MaxLength,
   IsEmail,
@@ -14,6 +15,20 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { BusinessTier } from '@prisma/client';
+
+// Loyalty pricing tier input — surcharge applied when a client returns
+// for the same service after `thresholdWeeks` weeks since their last
+// COMPLETED booking. Identity (id) is not exposed: tiers are fully
+// replaced on update (delete-and-recreate in a transaction).
+export class PricingTierInputDto {
+  @IsNumber()
+  @Min(1)
+  thresholdWeeks: number;
+
+  @IsNumber()
+  @Min(1)
+  surchargeCents: number;
+}
 
 export class CreateBusinessDto {
   @IsString()
@@ -199,6 +214,12 @@ export class CreateBusinessServiceDto {
   @IsString()
   @IsOptional()
   businessCategoryId?: string;
+
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => PricingTierInputDto)
+  pricingTiers?: PricingTierInputDto[];
 }
 
 export class UpdateBusinessServiceDto {
@@ -241,6 +262,13 @@ export class UpdateBusinessServiceDto {
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
+
+  // Full replacement: existing tiers are deleted and recreated from this list.
+  @IsArray()
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => PricingTierInputDto)
+  pricingTiers?: PricingTierInputDto[];
 }
 
 export class SearchBusinessDto {

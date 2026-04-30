@@ -14,7 +14,6 @@ import { EmployeesService } from './employees.service';
 import {
   CreateEmployeeDto,
   UpdateEmployeeDto,
-  GetAvailableSlotsDto,
   GetAvailableSlotsRangeDto,
   CreateEmployeeExceptionDto,
   ListEmployeeExceptionsDto,
@@ -38,16 +37,8 @@ export class EmployeesController {
     return this.employeesService.findByBusiness(businessId);
   }
 
-  // Single-day slots — kept for backward compat. Prefer /slots-range below.
-  @Get('slots')
-  @Throttle({ default: { ttl: 10_000, limit: 60 } })
-  @UseGuards(OptionalAuthGuard)
-  getAvailableSlots(@Req() req: any, @Query() dto: GetAvailableSlotsDto) {
-    return this.employeesService.getAvailableSlots(dto, req.user?.id ?? null);
-  }
-
   // Bulk slots: returns all days in [dateFrom, dateTo] in one round-trip.
-  // 5 DB queries total instead of 5 per day — preferred for week views.
+  // 5 DB queries total instead of 5 per day.
   @Get('slots-range')
   @Throttle({ default: { ttl: 10_000, limit: 30 } })
   @UseGuards(OptionalAuthGuard)

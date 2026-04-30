@@ -124,17 +124,6 @@ export class UpdateEmployeeDto {
   serviceIds?: string[];
 }
 
-export class GetAvailableSlotsDto {
-  @IsString()
-  employeeId: string;
-
-  @IsString()
-  businessServiceId: string;
-
-  @IsString()
-  date: string; // "2024-01-15"
-}
-
 export class GetAvailableSlotsRangeDto {
   @IsString()
   employeeId: string;

@@ -107,7 +107,11 @@ export class BusinessService {
   }
 
   async findByOwner(userId: string) {
-    const business = await this.prisma.business.findUnique({
+    // Returns null when the user has no business, so callers like the client
+    // booking page can use this as a "is current user a pro?" probe without
+    // producing a 404 in the network panel. Admin endpoints that require the
+    // business to exist should call findByOwnerOrThrow instead.
+    return this.prisma.business.findUnique({
       where: { ownerId: userId },
       include: {
         employees: {
@@ -150,11 +154,14 @@ export class BusinessService {
         },
       },
     });
+  }
 
+  /** Variant of findByOwner that throws 404 when the user has no business. */
+  async findByOwnerOrThrow(userId: string) {
+    const business = await this.findByOwner(userId);
     if (!business) {
       throw new NotFoundException('Business non trouvé');
     }
-
     return business;
   }
 

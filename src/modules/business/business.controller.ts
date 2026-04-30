@@ -69,7 +69,7 @@ export class BusinessController {
   @Get('promotions/mine')
   @UseGuards(AuthGuard)
   async getMyPromotions(@Req() req: any) {
-    const business = await this.businessService.findByOwner(req.user.id);
+    const business = await this.businessService.findByOwnerOrThrow(req.user.id);
     return this.businessService.getPromotions(business.id);
   }
 
@@ -138,7 +138,7 @@ export class BusinessController {
   @Get('hours/mine')
   @UseGuards(AuthGuard)
   async getMyHours(@Req() req: any) {
-    const business = await this.businessService.findByOwner(req.user.id);
+    const business = await this.businessService.findByOwnerOrThrow(req.user.id);
     return this.businessService.getHours(business.id);
   }
 
@@ -160,7 +160,7 @@ export class BusinessController {
   @Get('categories/mine')
   @UseGuards(AuthGuard)
   async getMyCategories(@Req() req: any) {
-    const business = await this.businessService.findByOwner(req.user.id);
+    const business = await this.businessService.findByOwnerOrThrow(req.user.id);
     return this.businessService.getCategories(business.id);
   }
 
@@ -207,7 +207,7 @@ export class BusinessController {
   @Get('images/mine')
   @UseGuards(AuthGuard)
   async getMyImages(@Req() req: any) {
-    const business = await this.businessService.findByOwner(req.user.id);
+    const business = await this.businessService.findByOwnerOrThrow(req.user.id);
     return this.businessService.getImages(business.id);
   }
 

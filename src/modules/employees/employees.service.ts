@@ -183,7 +183,10 @@ export class EmployeesService {
     return { success: true };
   }
 
-  async getAvailableSlots(dto: GetAvailableSlotsDto) {
+  async getAvailableSlots(
+    dto: GetAvailableSlotsDto,
+    requesterId: string | null = null,
+  ) {
     const { employeeId, businessServiceId, date } = dto;
 
     // Get employee with ALL weekly availability slots (multiple per day now allowed)
@@ -198,9 +201,13 @@ export class EmployeesService {
       throw new NotFoundException('Employé non trouvé');
     }
 
-    // Get service duration
+    // Get service duration + loyalty pricing tiers in a single query so the
+    // frontend can compute the final price locally without a follow-up call.
     const service = await this.prisma.businessService.findUnique({
       where: { id: businessServiceId },
+      include: {
+        pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
+      },
     });
 
     if (!service) {
@@ -220,9 +227,10 @@ export class EmployeesService {
       include: { slots: true },
     });
 
-    // If explicitly closed on that date, no slots available
+    // If explicitly closed on that date, no slots available. Loyalty info is
+    // skipped here to save a DB roundtrip — the user can't book anyway.
     if (exception?.isClosed) {
-      return { slots: [] };
+      return { slots: [], loyalty: null };
     }
 
     // Resolve effective time ranges. An exception with slots overrides the
@@ -241,23 +249,40 @@ export class EmployeesService {
     }
 
     if (ranges.length === 0) {
-      return { slots: [] };
+      return { slots: [], loyalty: null };
     }
 
     // Get existing bookings for this employee on this date
     const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
     const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
 
-    const existingBookings = await this.prisma.booking.findMany({
-      where: {
-        employeeId,
-        scheduledAt: { gte: startOfDay, lte: endOfDay },
-        status: { in: ['PENDING', 'ACCEPTED'] },
-      },
-      include: {
-        businessService: { select: { durationMinutes: true } },
-      },
-    });
+    // Run the bookings-of-the-day query and the loyalty "last COMPLETED
+    // booking for this requester+service" query in parallel. The latter is
+    // backed by the (requesterId, businessServiceId, status, scheduledAt)
+    // composite index — a single indexed lookup on a separate connection.
+    const [existingBookings, lastCompletedBooking] = await Promise.all([
+      this.prisma.booking.findMany({
+        where: {
+          employeeId,
+          scheduledAt: { gte: startOfDay, lte: endOfDay },
+          status: { in: ['PENDING', 'ACCEPTED'] },
+        },
+        include: {
+          businessService: { select: { durationMinutes: true } },
+        },
+      }),
+      requesterId
+        ? this.prisma.booking.findFirst({
+            where: {
+              requesterId,
+              businessServiceId,
+              status: 'COMPLETED',
+            },
+            orderBy: { scheduledAt: 'desc' },
+            select: { scheduledAt: true },
+          })
+        : Promise.resolve(null),
+    ]);
 
     // Helpers
     const slotDuration = service.durationMinutes;
@@ -313,7 +338,16 @@ export class EmployeesService {
       a.time.localeCompare(b.time),
     );
 
-    return { slots };
+    return {
+      slots,
+      loyalty: {
+        lastCompletedAt: lastCompletedBooking?.scheduledAt ?? null,
+        pricingTiers: service.pricingTiers.map((t) => ({
+          thresholdWeeks: t.thresholdWeeks,
+          surchargeCents: t.surchargeCents,
+        })),
+      },
+    };
   }
 
   // ============================================

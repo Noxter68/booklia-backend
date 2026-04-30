@@ -19,6 +19,7 @@ import {
   ListEmployeeExceptionsDto,
 } from './dto/employee.dto';
 import { AuthGuard } from '../auth/auth.guard';
+import { OptionalAuthGuard } from '../auth/optional-auth.guard';
 
 @Controller('employees')
 export class EmployeesController {
@@ -36,8 +37,9 @@ export class EmployeesController {
   }
 
   @Get('slots')
-  getAvailableSlots(@Query() dto: GetAvailableSlotsDto) {
-    return this.employeesService.getAvailableSlots(dto);
+  @UseGuards(OptionalAuthGuard)
+  getAvailableSlots(@Req() req: any, @Query() dto: GetAvailableSlotsDto) {
+    return this.employeesService.getAvailableSlots(dto, req.user?.id ?? null);
   }
 
   // Static path — must be declared before `:id` to avoid being shadowed

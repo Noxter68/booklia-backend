@@ -15,6 +15,7 @@ import {
   CreateEmployeeDto,
   UpdateEmployeeDto,
   GetAvailableSlotsDto,
+  GetAvailableSlotsRangeDto,
   CreateEmployeeExceptionDto,
   ListEmployeeExceptionsDto,
 } from './dto/employee.dto';
@@ -37,14 +38,30 @@ export class EmployeesController {
     return this.employeesService.findByBusiness(businessId);
   }
 
-  // Slots are fetched in bursts of 7 (one per day of the visible week) every
-  // time the user navigates between weeks. Allow generous bursts on this
-  // single endpoint without loosening the global throttle.
+  // Single-day slots — kept for backward compat. Prefer /slots-range below.
   @Get('slots')
   @Throttle({ default: { ttl: 10_000, limit: 60 } })
   @UseGuards(OptionalAuthGuard)
   getAvailableSlots(@Req() req: any, @Query() dto: GetAvailableSlotsDto) {
     return this.employeesService.getAvailableSlots(dto, req.user?.id ?? null);
+  }
+
+  // Bulk slots: returns all days in [dateFrom, dateTo] in one round-trip.
+  // 5 DB queries total instead of 5 per day — preferred for week views.
+  @Get('slots-range')
+  @Throttle({ default: { ttl: 10_000, limit: 30 } })
+  @UseGuards(OptionalAuthGuard)
+  getAvailableSlotsRange(
+    @Req() req: any,
+    @Query() dto: GetAvailableSlotsRangeDto,
+  ) {
+    return this.employeesService.getAvailableSlotsRange(
+      dto.employeeId,
+      dto.businessServiceId,
+      dto.dateFrom,
+      dto.dateTo,
+      req.user?.id ?? null,
+    );
   }
 
   // Static path — must be declared before `:id` to avoid being shadowed

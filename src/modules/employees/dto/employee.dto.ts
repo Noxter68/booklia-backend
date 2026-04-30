@@ -135,6 +135,20 @@ export class GetAvailableSlotsDto {
   date: string; // "2024-01-15"
 }
 
+export class GetAvailableSlotsRangeDto {
+  @IsString()
+  employeeId: string;
+
+  @IsString()
+  businessServiceId: string;
+
+  @IsString()
+  dateFrom: string; // "2024-01-15" — inclusive
+
+  @IsString()
+  dateTo: string; // "2024-01-21" — inclusive
+}
+
 // ============================================
 // EMPLOYEE EXCEPTIONS (closures / special hours)
 // ============================================

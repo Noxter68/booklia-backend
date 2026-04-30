@@ -60,6 +60,22 @@ export class BookingsController {
     return this.bookingsService.findByUser(user.id, role, from, to);
   }
 
+  /**
+   * Cheap probe used by the public business page: "does this user have a
+   * COMPLETED booking with this business that has not been reviewed yet?".
+   * Replaces a full /bookings/me fetch + client-side filter.
+   */
+  @Get('can-review')
+  async canReview(
+    @CurrentUser() user: User,
+    @Query('businessId') businessId: string,
+  ) {
+    return this.bookingsService.findReviewableBookingForBusiness(
+      user.id,
+      businessId,
+    );
+  }
+
   @Get('revenue-stats')
   async revenueStats(
     @CurrentUser() user: User,

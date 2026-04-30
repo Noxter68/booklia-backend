@@ -9,8 +9,14 @@ import {
   Query,
   UseGuards,
   Req,
+  Header,
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
+
+// 60s shared cache + 5min stale-while-revalidate for public business reads.
+// Mutations bust the Redis cache; the HTTP layer just shaves off duplicate
+// requests from the same client within the window.
+const PUBLIC_BUSINESS_CACHE = 'public, max-age=60, stale-while-revalidate=300';
 import { BusinessService } from './business.service';
 import {
   CreateBusinessDto,
@@ -53,11 +59,13 @@ export class BusinessController {
 
   @Get('search')
   @Throttle({ default: { ttl: 60_000, limit: 60 } })
+  @Header('Cache-Control', PUBLIC_BUSINESS_CACHE)
   search(@Query() dto: SearchBusinessDto) {
     return this.businessService.search(dto);
   }
 
   @Get('owner/:userId')
+  @Header('Cache-Control', PUBLIC_BUSINESS_CACHE)
   findByOwnerId(@Param('userId') userId: string) {
     return this.businessService.findByOwnerPublic(userId);
   }
@@ -96,6 +104,7 @@ export class BusinessController {
   }
 
   @Get(':slug')
+  @Header('Cache-Control', PUBLIC_BUSINESS_CACHE)
   findBySlug(@Param('slug') slug: string) {
     return this.businessService.findBySlug(slug);
   }
@@ -127,6 +136,7 @@ export class BusinessController {
   }
 
   @Get(':id/services')
+  @Header('Cache-Control', PUBLIC_BUSINESS_CACHE)
   getServices(@Param('id') id: string) {
     return this.businessService.getServices(id);
   }
@@ -149,6 +159,7 @@ export class BusinessController {
   }
 
   @Get(':slug/hours')
+  @Header('Cache-Control', PUBLIC_BUSINESS_CACHE)
   getHoursBySlug(@Param('slug') slug: string) {
     return this.businessService.getHoursBySlug(slug);
   }
@@ -230,6 +241,7 @@ export class BusinessController {
   }
 
   @Get(':slug/images')
+  @Header('Cache-Control', PUBLIC_BUSINESS_CACHE)
   getImagesBySlug(@Param('slug') slug: string) {
     return this.businessService.getImagesBySlug(slug);
   }

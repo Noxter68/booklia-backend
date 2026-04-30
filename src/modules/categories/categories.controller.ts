@@ -1,17 +1,22 @@
-import { Controller, Get, Param, Headers } from '@nestjs/common';
+import { Controller, Get, Param, Headers, Header } from '@nestjs/common';
 import { CategoriesService } from './categories.service';
+
+// Categories change rarely; let browsers cache them and revalidate softly.
+const PUBLIC_CACHE = 'public, max-age=300, stale-while-revalidate=600';
 
 @Controller('categories')
 export class CategoriesController {
   constructor(private categoriesService: CategoriesService) {}
 
   @Get()
+  @Header('Cache-Control', PUBLIC_CACHE)
   async findAll(@Headers('accept-language') acceptLanguage?: string) {
     const locale = this.parseLocale(acceptLanguage);
     return this.categoriesService.findAll(locale);
   }
 
   @Get(':idOrSlug')
+  @Header('Cache-Control', PUBLIC_CACHE)
   async findOne(
     @Param('idOrSlug') idOrSlug: string,
     @Headers('accept-language') acceptLanguage?: string,

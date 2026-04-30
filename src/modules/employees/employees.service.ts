@@ -11,10 +11,29 @@ import {
   CreateEmployeeExceptionDto,
   ListEmployeeExceptionsDto,
 } from './dto/employee.dto';
+import { CacheService } from '../cache/cache.service';
 
 @Injectable()
 export class EmployeesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cacheService: CacheService,
+  ) {}
+
+  private async invalidateBusinessEmployees(business: {
+    id: string;
+    slug: string;
+    ownerId: string;
+  }) {
+    // The full business payload (findBySlug, findByOwner, findByOwnerPublic)
+    // embeds the employees list, so editing staff must bust those caches too.
+    await Promise.all([
+      this.cacheService.del(CacheService.employeesBusinessKey(business.id)),
+      this.cacheService.del(CacheService.businessKey(business.slug)),
+      this.cacheService.del(CacheService.businessMineKey(business.ownerId)),
+      this.cacheService.del(CacheService.businessOwnerPublicKey(business.ownerId)),
+    ]);
+  }
 
   async create(userId: string, dto: CreateEmployeeDto) {
     const business = await this.prisma.business.findUnique({
@@ -54,10 +73,22 @@ export class EmployeesService {
       },
     });
 
+    await this.invalidateBusinessEmployees(business);
     return employee;
   }
 
   async findByBusiness(businessId: string) {
+    const cacheKey = CacheService.employeesBusinessKey(businessId);
+    type Result = Awaited<ReturnType<typeof this.findByBusinessUncached>>;
+    const cached = await this.cacheService.get<Result>(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.findByBusinessUncached(businessId);
+    await this.cacheService.set(cacheKey, result, CacheService.TTL.EMPLOYEES_BUSINESS);
+    return result;
+  }
+
+  private findByBusinessUncached(businessId: string) {
     return this.prisma.employee.findMany({
       where: { businessId },
       include: {
@@ -155,6 +186,7 @@ export class EmployeesService {
       });
     });
 
+    await this.invalidateBusinessEmployees(business);
     return updated;
   }
 
@@ -179,6 +211,7 @@ export class EmployeesService {
       where: { id: employeeId },
     });
 
+    await this.invalidateBusinessEmployees(business);
     return { success: true };
   }
 

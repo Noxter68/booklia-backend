@@ -16,6 +16,7 @@ import { CreateBlockDto } from './dto/create-block.dto';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateCalendarEntryDto } from './dto/update-calendar-entry.dto';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
+import { CacheService } from '../cache/cache.service';
 
 const ENTRY_INCLUDE = {
   businessService: {
@@ -40,7 +41,15 @@ export class CalendarService {
   constructor(
     private prisma: PrismaService,
     private wsGateway: WebsocketGateway,
+    private cacheService: CacheService,
   ) {}
+
+  private async invalidateBookingsCache(...userIds: (string | null | undefined)[]) {
+    const unique = Array.from(new Set(userIds.filter((u): u is string => !!u)));
+    await Promise.all(
+      unique.map((id) => this.cacheService.delByPattern(`bookings:user:${id}:*`)),
+    );
+  }
 
   private async getBusinessId(userId: string): Promise<string> {
     const business = await this.prisma.business.findUnique({
@@ -58,7 +67,7 @@ export class CalendarService {
     const now = new Date();
 
     // Auto-complete expired appointments (single SQL query, runs lazily on each fetch)
-    await this.prisma.booking.updateMany({
+    const autoCompleted = await this.prisma.booking.updateMany({
       where: {
         employee: { businessId },
         kind: CalendarEntryKind.APPOINTMENT,
@@ -70,6 +79,12 @@ export class CalendarService {
         completedAt: now,
       },
     });
+    if (autoCompleted.count > 0) {
+      // The provider's own bookings cache is stale; we don't track every
+      // requester touched here, so the daily cron's wide pattern wipe will
+      // catch the rest within its TTL.
+      await this.invalidateBookingsCache(userId);
+    }
 
     const where: Prisma.BookingWhereInput = {
       employee: { businessId },
@@ -122,6 +137,7 @@ export class CalendarService {
       include: ENTRY_INCLUDE,
     });
     this.wsGateway.sendCalendarUpdate(userId);
+    await this.invalidateBookingsCache(userId);
     return block;
   }
 
@@ -191,6 +207,7 @@ export class CalendarService {
       include: ENTRY_INCLUDE,
     });
     this.wsGateway.sendCalendarUpdate(userId);
+    await this.invalidateBookingsCache(userId, requesterId);
     return appointment;
   }
 
@@ -250,6 +267,7 @@ export class CalendarService {
       include: ENTRY_INCLUDE,
     });
     this.wsGateway.sendCalendarUpdate(userId);
+    await this.invalidateBookingsCache(userId, entry.requesterId, entry.providerId);
     return updated;
   }
 
@@ -272,6 +290,7 @@ export class CalendarService {
 
     await this.prisma.booking.delete({ where: { id: blockId } });
     this.wsGateway.sendCalendarUpdate(userId);
+    await this.invalidateBookingsCache(userId, block.requesterId, block.providerId);
     return { success: true };
   }
 

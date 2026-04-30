@@ -9,6 +9,7 @@ import {
   Query,
   UseGuards,
   Req,
+  Header,
 } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import {
@@ -33,6 +34,7 @@ export class EmployeesController {
   }
 
   @Get('business/:businessId')
+  @Header('Cache-Control', 'public, max-age=120, stale-while-revalidate=600')
   findByBusiness(@Param('businessId') businessId: string) {
     return this.employeesService.findByBusiness(businessId);
   }

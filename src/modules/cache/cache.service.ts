@@ -17,6 +17,10 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     BUSINESS_PAGE: 120, // 2 minutes for business pages
     SERVICES: 180, // 3 minutes for services list
     CLIENT_STATS: 120, // 2 minutes for client stats
+    BUSINESS_OWNER: 120, // 2 minutes for /business/mine and /business/owner/:id
+    BOOKINGS_USER: 60, // 1 minute for /bookings/me
+    EMPLOYEES_BUSINESS: 180, // 3 minutes for /employees/business/:id
+    REVIEWS_BUSINESS: 300, // 5 minutes for /reviews/business/:id
   };
 
   constructor(private configService: ConfigService) {}
@@ -155,6 +159,36 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
    */
   static clientStatsKey(businessId: string, userId: string): string {
     return `client-stats:${businessId}:${userId}`;
+  }
+
+  /** /business/mine — current user's own business (auth-scoped, full payload). */
+  static businessMineKey(userId: string): string {
+    return `business:mine:${userId}`;
+  }
+
+  /** /business/owner/:userId — public variant of the same business. */
+  static businessOwnerPublicKey(userId: string): string {
+    return `business:owner-public:${userId}`;
+  }
+
+  /** /bookings/me — listing for the current user, optionally filtered. */
+  static bookingsUserKey(
+    userId: string,
+    role: string | undefined,
+    from: string | undefined,
+    to: string | undefined,
+  ): string {
+    return `bookings:user:${userId}:${role ?? '_'}:${from ?? '_'}:${to ?? '_'}`;
+  }
+
+  /** /employees/business/:id — staff list for a business (public). */
+  static employeesBusinessKey(businessId: string): string {
+    return `employees:business:${businessId}`;
+  }
+
+  /** /reviews/business/:id — reviews list for a business (public). */
+  static reviewsBusinessKey(businessId: string): string {
+    return `reviews:business:${businessId}`;
   }
 
   /**

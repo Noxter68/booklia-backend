@@ -247,6 +247,7 @@ export class BookingsService {
       .ensureClient(businessService.businessId, userId)
       .catch(() => {});
 
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
     return booking;
   }
 
@@ -279,6 +280,7 @@ export class BookingsService {
       status: BookingStatus.ACCEPTED,
     });
 
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
     return updated;
   }
 
@@ -306,6 +308,7 @@ export class BookingsService {
         .catch(() => {});
     }
 
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
     return updated;
   }
 
@@ -341,6 +344,12 @@ export class BookingsService {
       }
     }
 
+    // The cron may have flipped many bookings across many users — wipe the
+    // whole bookings cache rather than hand-tracking each affected user.
+    if (results.some((r) => r.success)) {
+      await this.cacheService.delByPattern('bookings:user:*');
+    }
+
     return { processed: results.length, results };
   }
 
@@ -351,7 +360,7 @@ export class BookingsService {
   private async autoCompleteExpiredForUser(userId: string) {
     const now = new Date();
 
-    await this.prisma.booking.updateMany({
+    const result = await this.prisma.booking.updateMany({
       where: {
         status: { in: [BookingStatus.ACCEPTED, BookingStatus.PENDING] },
         kind: CalendarEntryKind.APPOINTMENT,
@@ -363,6 +372,7 @@ export class BookingsService {
         completedAt: now,
       },
     });
+    return result.count;
   }
 
   async cancel(userId: string, bookingId: string) {
@@ -410,6 +420,7 @@ export class BookingsService {
       status: BookingStatus.CANCELED,
     });
 
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
     return updated;
   }
 
@@ -424,9 +435,11 @@ export class BookingsService {
       throw new BadRequestException('Only canceled bookings can be deleted');
     }
 
-    return this.prisma.booking.delete({
+    const deleted = await this.prisma.booking.delete({
       where: { id: bookingId },
     });
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
+    return deleted;
   }
 
   async reject(userId: string, bookingId: string, message?: string) {
@@ -465,13 +478,35 @@ export class BookingsService {
       rejectionMessage: message,
     });
 
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
     return updated;
   }
 
   async findByUser(userId: string, role?: 'requester' | 'provider', from?: string, to?: string) {
-    // First, auto-complete any expired ACCEPTED bookings for this user
-    await this.autoCompleteExpiredForUser(userId);
+    // First, auto-complete any expired ACCEPTED bookings for this user. If
+    // anything was actually flipped, the bookings cache for this user is now
+    // stale and must be busted before serving from it.
+    const autoCompleted = await this.autoCompleteExpiredForUser(userId);
+    if (autoCompleted > 0) {
+      await this.invalidateUserBookingsCache(userId);
+    }
 
+    const cacheKey = CacheService.bookingsUserKey(userId, role, from, to);
+    type Result = Awaited<ReturnType<typeof this.findByUserUncached>>;
+    const cached = await this.cacheService.get<Result>(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.findByUserUncached(userId, role, from, to);
+    await this.cacheService.set(cacheKey, result, CacheService.TTL.BOOKINGS_USER);
+    return result;
+  }
+
+  private async findByUserUncached(
+    userId: string,
+    role?: 'requester' | 'provider',
+    from?: string,
+    to?: string,
+  ) {
     const where: any = {};
 
     if (role === 'requester') {
@@ -523,6 +558,44 @@ export class BookingsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * Returns the most recent completed-but-unreviewed booking for `userId`
+   * with `businessId`, or null. Used as a cheap probe instead of fetching
+   * /bookings/me and filtering client-side.
+   */
+  async findReviewableBookingForBusiness(userId: string, businessId: string) {
+    if (!businessId) return null;
+    const booking = await this.prisma.booking.findFirst({
+      where: {
+        requesterId: userId,
+        status: BookingStatus.COMPLETED,
+        businessService: { businessId },
+        reviews: { none: { type: 'REVIEW_PROVIDER' } },
+      },
+      orderBy: { completedAt: 'desc' },
+      select: {
+        id: true,
+        completedAt: true,
+        businessService: { select: { id: true, name: true } },
+      },
+    });
+    return booking;
+  }
+
+  /**
+   * Invalidate every cached `/bookings/me` variant for one or two users.
+   * Mutations that touch a booking can affect both the requester and the
+   * provider, so callers usually pass both IDs.
+   */
+  private async invalidateUserBookingsCache(...userIds: (string | null | undefined)[]) {
+    const unique = Array.from(new Set(userIds.filter((u): u is string => !!u)));
+    await Promise.all(
+      unique.map((id) =>
+        this.cacheService.delByPattern(`bookings:user:${id}:*`),
+      ),
+    );
   }
 
   async findOne(bookingId: string) {

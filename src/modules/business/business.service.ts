@@ -66,12 +66,42 @@ export class BusinessService {
     private cacheService: CacheService,
   ) {}
 
-  private async invalidateBusinessCache(slug: string) {
+  private async invalidateBusinessCache(slug: string, ownerId?: string) {
     // Only invalidate the precise slug key; search results stay cached until
     // their 5 min TTL expires. A freshly edited business appearing in a
     // result list with slightly stale name/phone for a few minutes is an
     // acceptable tradeoff to keep the search cache hit rate high.
-    await this.cacheService.del(CacheService.businessKey(slug));
+    const ops: Promise<unknown>[] = [
+      this.cacheService.del(CacheService.businessKey(slug)),
+    ];
+    if (ownerId) {
+      ops.push(
+        this.cacheService.del(CacheService.businessMineKey(ownerId)),
+        this.cacheService.del(CacheService.businessOwnerPublicKey(ownerId)),
+        this.cacheService.delByPattern(`employees:business:*`), // safe net
+        this.cacheService.delByPattern(`reviews:business:*`),   // safe net
+      );
+    }
+    await Promise.all(ops);
+  }
+
+  /**
+   * Targeted invalidation when we know the businessId. Avoids the broad
+   * pattern wildcards that `invalidateBusinessCache` falls back to when only
+   * the slug is known.
+   */
+  private async invalidateBusinessScopedCache(params: {
+    slug: string;
+    ownerId: string;
+    businessId: string;
+  }) {
+    await Promise.all([
+      this.cacheService.del(CacheService.businessKey(params.slug)),
+      this.cacheService.del(CacheService.businessMineKey(params.ownerId)),
+      this.cacheService.del(CacheService.businessOwnerPublicKey(params.ownerId)),
+      this.cacheService.del(CacheService.employeesBusinessKey(params.businessId)),
+      this.cacheService.del(CacheService.reviewsBusinessKey(params.businessId)),
+    ]);
   }
 
   private generateSlug(name: string): string {
@@ -129,6 +159,17 @@ export class BusinessService {
     // booking page can use this as a "is current user a pro?" probe without
     // producing a 404 in the network panel. Admin endpoints that require the
     // business to exist should call findByOwnerOrThrow instead.
+    const cacheKey = CacheService.businessMineKey(userId);
+    type Result = Awaited<ReturnType<typeof this.findByOwnerUncached>>;
+    const cached = await this.cacheService.get<Result>(cacheKey);
+    if (cached) return cached;
+
+    const business = await this.findByOwnerUncached(userId);
+    await this.cacheService.set(cacheKey, business, CacheService.TTL.BUSINESS_OWNER);
+    return business;
+  }
+
+  private async findByOwnerUncached(userId: string) {
     return this.prisma.business.findUnique({
       where: { ownerId: userId },
       include: {
@@ -185,6 +226,10 @@ export class BusinessService {
 
   /** Find business by owner ID (public endpoint) */
   async findByOwnerPublic(userId: string) {
+    const cacheKey = CacheService.businessOwnerPublicKey(userId);
+    const cached = await this.cacheService.get(cacheKey);
+    if (cached) return cached;
+
     const business = await this.prisma.business.findUnique({
       where: { ownerId: userId, isActive: true },
       include: {
@@ -228,6 +273,7 @@ export class BusinessService {
     });
 
     // Return null if no business found (not an error for public endpoint)
+    await this.cacheService.set(cacheKey, business, CacheService.TTL.BUSINESS_OWNER);
     return business;
   }
 
@@ -369,7 +415,7 @@ export class BusinessService {
       },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
 
     return updated;
   }
@@ -649,7 +695,7 @@ export class BusinessService {
       },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return service;
   }
 
@@ -708,7 +754,7 @@ export class BusinessService {
       });
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return updated;
   }
 
@@ -733,7 +779,7 @@ export class BusinessService {
       where: { id: serviceId },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return { success: true };
   }
 
@@ -807,7 +853,7 @@ export class BusinessService {
       ),
     ]);
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return this.getHours(business.id);
   }
 
@@ -867,7 +913,7 @@ export class BusinessService {
       include: { options: true },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return category;
   }
 
@@ -947,7 +993,7 @@ export class BusinessService {
       });
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return updated;
   }
 
@@ -978,7 +1024,7 @@ export class BusinessService {
       where: { id: categoryId },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return { success: true };
   }
 
@@ -1007,7 +1053,7 @@ export class BusinessService {
       },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return updated;
   }
 
@@ -1070,7 +1116,7 @@ export class BusinessService {
       },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return image;
   }
 
@@ -1101,7 +1147,7 @@ export class BusinessService {
       where: { id: imageId },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return { success: true };
   }
 
@@ -1124,7 +1170,7 @@ export class BusinessService {
       ),
     );
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return this.getImages(business.id);
   }
 

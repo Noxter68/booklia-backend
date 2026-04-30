@@ -49,8 +49,7 @@
     "reflect-metadata": "^0.2.2",
     "resend": "^6.9.2",
     "rxjs": "^7.8.2",
-    "socket.io": "^4.8.3",
-    "stripe": "^20.3.0"
+    "socket.io": "^4.8.3"
   },
   "engines": {
     "node": ">=20"

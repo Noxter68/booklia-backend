@@ -10,7 +10,6 @@ import { AuthModule } from './modules/auth/auth.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { CategoriesModule } from './modules/categories/categories.module';
-import { StripeModule } from './modules/stripe/stripe.module';
 import { BusinessModule } from './modules/business/business.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { UploadModule } from './modules/upload/upload.module';
@@ -49,7 +48,6 @@ import { InviteRequestsModule } from './modules/invite-requests/invite-requests.
     BookingsModule,
     ReviewsModule,
     CategoriesModule,
-    StripeModule,
     ClientsModule,
     BusinessModule,
     EmployeesModule,

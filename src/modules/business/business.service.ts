@@ -40,6 +40,24 @@ function assertUniqueThresholds(
   }
 }
 
+/**
+ * QUOTE / FREE services have no flat price and no loyalty surcharge. Force
+ * priceCents to 0 and drop any pricingTiers payload so the DB stays coherent
+ * regardless of what the client sent.
+ */
+function normalizePricingForMode<
+  T extends {
+    priceMode?: 'FIXED' | 'QUOTE' | 'FREE';
+    priceCents?: number;
+    pricingTiers?: { thresholdWeeks: number; surchargeCents: number }[];
+  },
+>(input: T): T {
+  if (input.priceMode && input.priceMode !== 'FIXED') {
+    return { ...input, priceCents: 0, pricingTiers: [] };
+  }
+  return input;
+}
+
 @Injectable()
 export class BusinessService {
   constructor(
@@ -612,7 +630,8 @@ export class BusinessService {
       throw new NotFoundException('Business non trouvé');
     }
 
-    const { pricingTiers, ...serviceData } = dto;
+    const normalized = normalizePricingForMode(dto);
+    const { pricingTiers, ...serviceData } = normalized;
     assertUniqueThresholds(pricingTiers);
 
     const service = await this.prisma.businessService.create({
@@ -655,7 +674,10 @@ export class BusinessService {
       throw new ForbiddenException('Accès refusé');
     }
 
-    const { pricingTiers, ...serviceData } = dto;
+    // If switching to QUOTE/FREE, drop any flat price + tiers regardless of
+    // what the client sent — these modes are price-less by definition.
+    const normalized = normalizePricingForMode(dto);
+    const { pricingTiers, ...serviceData } = normalized;
     assertUniqueThresholds(pricingTiers);
 
     // Full replacement of tiers when the field is provided. Skip entirely when

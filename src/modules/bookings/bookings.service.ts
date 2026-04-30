@@ -138,19 +138,25 @@ export class BookingsService {
       scheduledEndAt = new Date(scheduledAt.getTime() + totalDurationMinutes * 60000);
     }
 
-    // Loyalty surcharge applies on the service base price only (not options).
-    // Computed server-side from authoritative tiers + COMPLETED-bookings history,
+    // Loyalty surcharge only applies to FIXED-priced services. Computed
+    // server-side from authoritative tiers + COMPLETED-bookings history,
     // never trusting any price value sent by the client.
-    const { surchargeCents, appliedTierWeeks } = scheduledAt
-      ? computeLoyaltySurcharge(
-          businessService.pricingTiers,
-          lastCompletedBooking?.scheduledAt ?? null,
-          scheduledAt,
-        )
-      : { surchargeCents: 0, appliedTierWeeks: null };
+    const isFixedPrice = businessService.priceMode === 'FIXED';
+    const { surchargeCents, appliedTierWeeks } =
+      isFixedPrice && scheduledAt
+        ? computeLoyaltySurcharge(
+            businessService.pricingTiers,
+            lastCompletedBooking?.scheduledAt ?? null,
+            scheduledAt,
+          )
+        : { surchargeCents: 0, appliedTierWeeks: null };
 
-    const totalPriceCents =
-      businessService.priceCents + optionsTotalCents + surchargeCents;
+    // QUOTE: agreedPriceCents stays null (the pro will set it later).
+    // FREE / FIXED: store the computed total (service + options + surcharge).
+    const agreedPriceCents =
+      businessService.priceMode === 'QUOTE'
+        ? null
+        : businessService.priceCents + optionsTotalCents + surchargeCents;
 
     // Check if business has auto-accept enabled
     const autoAccept = businessService.business.autoAcceptBookings;
@@ -162,7 +168,7 @@ export class BookingsService {
         providerId: businessService.business.ownerId,
         businessServiceId: dto.businessServiceId,
         employeeId: dto.employeeId,
-        agreedPriceCents: totalPriceCents,
+        agreedPriceCents,
         appliedTierWeeks,
         scheduledAt,
         scheduledEndAt,

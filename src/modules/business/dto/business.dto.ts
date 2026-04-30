@@ -14,7 +14,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { BusinessTier } from '@prisma/client';
+import { BusinessTier, ServicePriceMode } from '@prisma/client';
 
 // Loyalty pricing tier input — surcharge applied when a client returns
 // for the same service after `thresholdWeeks` weeks since their last
@@ -197,6 +197,10 @@ export class CreateBusinessServiceDto {
   @MaxLength(10000)
   detailedDescription?: string; // Rich text HTML content
 
+  @IsEnum(ServicePriceMode)
+  @IsOptional()
+  priceMode?: ServicePriceMode;
+
   @IsNumber()
   priceCents: number;
 
@@ -238,6 +242,10 @@ export class UpdateBusinessServiceDto {
   @IsOptional()
   @MaxLength(10000)
   detailedDescription?: string; // Rich text HTML content
+
+  @IsEnum(ServicePriceMode)
+  @IsOptional()
+  priceMode?: ServicePriceMode;
 
   @IsNumber()
   @IsOptional()

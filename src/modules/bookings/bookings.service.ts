@@ -13,6 +13,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
 import { ClientsService } from '../clients/clients.service';
 import { CacheService } from '../cache/cache.service';
+import { computeLoyaltySurcharge } from './pricing.helper';
 
 @Injectable()
 export class BookingsService {
@@ -27,18 +28,33 @@ export class BookingsService {
   ) {}
 
   async create(userId: string, dto: CreateBookingDto) {
-    // Fetch business service with its category's allowed options
-    const businessService = await this.prisma.businessService.findUnique({
-      where: { id: dto.businessServiceId },
-      include: {
-        business: {
-          include: { owner: true },
-        },
-        businessCategory: {
-          include: { options: true },
-        },
-      },
-    });
+    // Run all independent reads in parallel: service (with tiers + options),
+    // employee, the requester's own business (to block pro accounts) and the
+    // last COMPLETED booking for loyalty pricing. The "last completed" query
+    // is backed by the (requesterId, businessServiceId, status, scheduledAt)
+    // composite index — single indexed lookup on a separate connection.
+    const [businessService, employee, userBusiness, lastCompletedBooking] =
+      await Promise.all([
+        this.prisma.businessService.findUnique({
+          where: { id: dto.businessServiceId },
+          include: {
+            business: { include: { owner: true } },
+            businessCategory: { include: { options: true } },
+            pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
+          },
+        }),
+        this.prisma.employee.findUnique({ where: { id: dto.employeeId } }),
+        this.prisma.business.findUnique({ where: { ownerId: userId } }),
+        this.prisma.booking.findFirst({
+          where: {
+            requesterId: userId,
+            businessServiceId: dto.businessServiceId,
+            status: 'COMPLETED',
+          },
+          orderBy: { scheduledAt: 'desc' },
+          select: { scheduledAt: true },
+        }),
+      ]);
 
     if (!businessService) {
       throw new NotFoundException('Business service not found');
@@ -50,11 +66,6 @@ export class BookingsService {
       );
     }
 
-    // Fetch employee
-    const employee = await this.prisma.employee.findUnique({
-      where: { id: dto.employeeId },
-    });
-
     if (!employee) {
       throw new NotFoundException('Employee not found');
     }
@@ -64,9 +75,6 @@ export class BookingsService {
     }
 
     // Business owners cannot book appointments
-    const userBusiness = await this.prisma.business.findUnique({
-      where: { ownerId: userId },
-    });
     if (userBusiness) {
       throw new ForbiddenException(
         'Les comptes professionnels ne peuvent pas effectuer de réservations. Veuillez utiliser un compte client.',
@@ -121,7 +129,6 @@ export class BookingsService {
     );
     const totalDurationMinutes =
       businessService.durationMinutes + optionsTotalMinutes;
-    const totalPriceCents = businessService.priceCents + optionsTotalCents;
 
     // Calculate scheduledEndAt based on total duration (service + options)
     let scheduledAt: Date | undefined;
@@ -130,6 +137,20 @@ export class BookingsService {
       scheduledAt = new Date(dto.scheduledAt);
       scheduledEndAt = new Date(scheduledAt.getTime() + totalDurationMinutes * 60000);
     }
+
+    // Loyalty surcharge applies on the service base price only (not options).
+    // Computed server-side from authoritative tiers + COMPLETED-bookings history,
+    // never trusting any price value sent by the client.
+    const { surchargeCents, appliedTierWeeks } = scheduledAt
+      ? computeLoyaltySurcharge(
+          businessService.pricingTiers,
+          lastCompletedBooking?.scheduledAt ?? null,
+          scheduledAt,
+        )
+      : { surchargeCents: 0, appliedTierWeeks: null };
+
+    const totalPriceCents =
+      businessService.priceCents + optionsTotalCents + surchargeCents;
 
     // Check if business has auto-accept enabled
     const autoAccept = businessService.business.autoAcceptBookings;
@@ -142,6 +163,7 @@ export class BookingsService {
         businessServiceId: dto.businessServiceId,
         employeeId: dto.employeeId,
         agreedPriceCents: totalPriceCents,
+        appliedTierWeeks,
         scheduledAt,
         scheduledEndAt,
         ...(autoAccept && { status: BookingStatus.ACCEPTED }),

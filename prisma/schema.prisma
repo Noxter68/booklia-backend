@@ -381,8 +381,9 @@ model BusinessService {
   detailedDescription String? // Rich text HTML content for detailed service info
 
   // Pricing
-  priceCents Int
-  currency   String @default("EUR")
+  priceMode  ServicePriceMode @default(FIXED)
+  priceCents Int // ignored when priceMode != FIXED, but kept for history
+  currency   String           @default("EUR")
 
   // Duration in minutes
   durationMinutes Int
@@ -656,6 +657,15 @@ enum NoteVisibility {
 enum VatMode {
   FRANCHISE_293B
   STANDARD
+}
+
+// FIXED  — flat priceCents charged at booking time (default behavior).
+// QUOTE  — "Sur devis": no upfront price, the pro fixes the amount later.
+// FREE   — Free / discovery appointment: no charge.
+enum ServicePriceMode {
+  FIXED
+  QUOTE
+  FREE
 }
 
 enum InvoiceStatus {

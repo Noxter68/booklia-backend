@@ -4,8 +4,10 @@
 import { wrapInLayout, ctaButton, detailRow, detailsTable } from './base-layout';
 import { formatDate, formatTime, formatPrice } from './helpers';
 import { getEmailTranslations } from './i18n';
+import { buildBookingIcs } from './ics';
 
 export interface BookingAcceptedData {
+  bookingId: string;
   clientName: string;
   businessName: string;
   serviceName: string;
@@ -15,6 +17,7 @@ export interface BookingAcceptedData {
   priceCents: number;
   address: string;
   city: string;
+  postalCode?: string;
   frontendUrl: string;
   locale?: string;
 }
@@ -22,6 +25,7 @@ export interface BookingAcceptedData {
 export function buildBookingAcceptedEmail(data: BookingAcceptedData): {
   subject: string;
   html: string;
+  icsAttachment: { filename: string; content: Buffer };
 } {
   const locale = data.locale || 'fr';
   const t = getEmailTranslations(locale);
@@ -50,8 +54,21 @@ export function buildBookingAcceptedEmail(data: BookingAcceptedData): {
     ${ctaButton(t.bookingConfirmedCta, `${data.frontendUrl}/mes-reservations`)}
   `;
 
+  const ics = buildBookingIcs({
+    uid: data.bookingId,
+    scheduledAt: data.scheduledAt,
+    durationMinutes: data.durationMinutes,
+    serviceName: data.serviceName,
+    businessName: data.businessName,
+    employeeName: data.employeeName,
+    address: data.address,
+    city: data.city,
+    postalCode: data.postalCode,
+  });
+
   return {
     subject: t.bookingConfirmedSubject(data.businessName),
     html: wrapInLayout(content, t.bookingConfirmedPreview(data.businessName), locale),
+    icsAttachment: { filename: 'rendez-vous.ics', content: ics },
   };
 }

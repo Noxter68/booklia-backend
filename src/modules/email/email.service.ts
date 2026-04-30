@@ -106,13 +106,31 @@ export class EmailService {
     this.logger.log(`Email with attachment sent to ${to}: "${subject}"`);
   }
 
-  /** Sends a booking confirmation email to the client. */
+  /**
+   * Same as sendWithAttachment but swallows errors — for fire-and-forget flows
+   * (booking confirmations/reminders) where email failures must not break the
+   * main application flow.
+   */
+  private async sendWithAttachmentSafe(
+    to: string,
+    subject: string,
+    html: string,
+    attachment: { filename: string; content: Buffer },
+  ): Promise<void> {
+    try {
+      await this.sendWithAttachment(to, subject, html, attachment);
+    } catch (err) {
+      this.logger.error(`Unexpected error sending email to ${to}`, err);
+    }
+  }
+
+  /** Sends a booking confirmation email to the client, with .ics attached. */
   async sendBookingAccepted(
     to: string,
     data: BookingAcceptedData,
   ): Promise<void> {
-    const { subject, html } = buildBookingAcceptedEmail(data);
-    await this.send(to, subject, html);
+    const { subject, html, icsAttachment } = buildBookingAcceptedEmail(data);
+    await this.sendWithAttachmentSafe(to, subject, html, icsAttachment);
   }
 
   /** Sends a booking cancellation email to the client. */
@@ -124,13 +142,13 @@ export class EmailService {
     await this.send(to, subject, html);
   }
 
-  /** Sends a 24h reminder email to the client. */
+  /** Sends a 24h reminder email to the client, with .ics attached. */
   async sendBookingReminder(
     to: string,
     data: BookingReminderData,
   ): Promise<void> {
-    const { subject, html } = buildBookingReminderEmail(data);
-    await this.send(to, subject, html);
+    const { subject, html, icsAttachment } = buildBookingReminderEmail(data);
+    await this.sendWithAttachmentSafe(to, subject, html, icsAttachment);
   }
 
   /** Sends an email verification link. */

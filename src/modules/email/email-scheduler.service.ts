@@ -85,6 +85,7 @@ export class EmailSchedulerService {
       if (!clientEmail || !booking.businessService) continue;
 
       await this.emailService.sendBookingReminder(clientEmail, {
+        bookingId: booking.id,
         clientName: booking.requester.name || 'Client',
         businessName: booking.businessService.business.name,
         serviceName: booking.businessService.name,

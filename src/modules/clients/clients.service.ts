@@ -55,7 +55,14 @@ export class ClientsService {
         data: {
           email: dto.email.toLowerCase().trim(),
           name: dto.name.trim(),
+          birthDate: dto.birthDate ? new Date(dto.birthDate) : null,
         },
+      });
+    } else if (dto.birthDate && !user.birthDate) {
+      // Backfill birthDate on existing user if missing
+      user = await this.prisma.user.update({
+        where: { id: user.id },
+        data: { birthDate: new Date(dto.birthDate) },
       });
     }
 
@@ -78,7 +85,7 @@ export class ClientsService {
         notes: dto.notes || null,
       },
       include: {
-        user: { select: { id: true, name: true, email: true, image: true } },
+        user: { select: { id: true, name: true, email: true, image: true, birthDate: true } },
       },
     });
 
@@ -126,7 +133,7 @@ export class ClientsService {
       where,
       include: {
         user: {
-          select: { id: true, name: true, email: true, image: true },
+          select: { id: true, name: true, email: true, image: true, birthDate: true },
         },
       },
       orderBy: { createdAt: 'desc' },
@@ -284,7 +291,7 @@ export class ClientsService {
       where: { id: clientId },
       include: {
         user: {
-          select: { id: true, name: true, email: true, image: true },
+          select: { id: true, name: true, email: true, image: true, birthDate: true },
         },
       },
     });
@@ -392,12 +399,21 @@ export class ClientsService {
       throw new ForbiddenException('Accès refusé');
     }
 
+    const { birthDate, ...businessClientData } = dto;
+
+    if (birthDate !== undefined) {
+      await this.prisma.user.update({
+        where: { id: client.userId },
+        data: { birthDate: birthDate ? new Date(birthDate) : null },
+      });
+    }
+
     return this.prisma.businessClient.update({
       where: { id: clientId },
-      data: dto,
+      data: businessClientData,
       include: {
         user: {
-          select: { id: true, name: true, email: true, image: true },
+          select: { id: true, name: true, email: true, image: true, birthDate: true },
         },
       },
     });

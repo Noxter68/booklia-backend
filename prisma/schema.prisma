@@ -23,6 +23,9 @@ model User {
   emailVerified Boolean @default(false)
   image         String?
 
+  // Date of birth (nullable: pre-existing users may not have it set)
+  birthDate DateTime?
+
   // Admin flag
   isAdmin Boolean @default(false)
 

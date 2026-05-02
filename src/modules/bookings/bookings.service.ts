@@ -386,6 +386,19 @@ export class BookingsService {
       throw new BadRequestException('Cannot cancel a completed or already canceled booking');
     }
 
+    // Clients cannot cancel within 24h of the scheduled start. Pros (provider)
+    // remain free to cancel at any time (urgent / health / etc.).
+    const isClient = booking.requesterId === userId;
+    if (isClient && booking.scheduledAt) {
+      const msUntilStart = booking.scheduledAt.getTime() - Date.now();
+      if (msUntilStart < 24 * 60 * 60 * 1000 && msUntilStart > 0) {
+        throw new BadRequestException({
+          code: 'CANCEL_WINDOW_EXPIRED',
+          message: 'Cancellation is no longer possible within 24 hours of the appointment.',
+        });
+      }
+    }
+
     const updated = await this.prisma.booking.update({
       where: { id: bookingId },
       data: { status: BookingStatus.CANCELED, canceledById: userId },

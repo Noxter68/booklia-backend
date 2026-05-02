@@ -154,6 +154,7 @@ export class NotificationsService {
 
       if (!booking.businessService) return;
       await this.emailService.sendBookingAccepted(booking.requester.email, {
+        bookingId: booking.id,
         clientName: booking.requester.name || 'Client',
         businessName: booking.businessService.business.name,
         serviceName: booking.businessService.name,
@@ -163,6 +164,7 @@ export class NotificationsService {
         priceCents: booking.agreedPriceCents || booking.businessService.priceCents,
         address: booking.businessService.business.address || '',
         city: booking.businessService.business.city || '',
+        postalCode: booking.businessService.business.postalCode || undefined,
         frontendUrl: this.frontendUrl,
       });
     } catch (err) {

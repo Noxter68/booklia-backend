@@ -9,16 +9,19 @@ import {
   Query,
   UseGuards,
   Req,
+  Header,
 } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import {
   CreateEmployeeDto,
   UpdateEmployeeDto,
-  GetAvailableSlotsDto,
+  GetAvailableSlotsRangeDto,
   CreateEmployeeExceptionDto,
   ListEmployeeExceptionsDto,
 } from './dto/employee.dto';
+import { Throttle } from '@nestjs/throttler';
 import { AuthGuard } from '../auth/auth.guard';
+import { OptionalAuthGuard } from '../auth/optional-auth.guard';
 
 @Controller('employees')
 export class EmployeesController {
@@ -31,13 +34,27 @@ export class EmployeesController {
   }
 
   @Get('business/:businessId')
+  @Header('Cache-Control', 'public, max-age=120, stale-while-revalidate=600')
   findByBusiness(@Param('businessId') businessId: string) {
     return this.employeesService.findByBusiness(businessId);
   }
 
-  @Get('slots')
-  getAvailableSlots(@Query() dto: GetAvailableSlotsDto) {
-    return this.employeesService.getAvailableSlots(dto);
+  // Bulk slots: returns all days in [dateFrom, dateTo] in one round-trip.
+  // 5 DB queries total instead of 5 per day.
+  @Get('slots-range')
+  @Throttle({ default: { ttl: 10_000, limit: 30 } })
+  @UseGuards(OptionalAuthGuard)
+  getAvailableSlotsRange(
+    @Req() req: any,
+    @Query() dto: GetAvailableSlotsRangeDto,
+  ) {
+    return this.employeesService.getAvailableSlotsRange(
+      dto.employeeId,
+      dto.businessServiceId,
+      dto.dateFrom,
+      dto.dateTo,
+      req.user?.id ?? null,
+    );
   }
 
   // Static path — must be declared before `:id` to avoid being shadowed

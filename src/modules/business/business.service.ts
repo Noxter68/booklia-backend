@@ -21,6 +21,43 @@ import {
   UpdateBusinessPromotionDto,
 } from './dto/business.dto';
 
+/**
+ * The DB has a UNIQUE(businessServiceId, thresholdWeeks) constraint that would
+ * surface as a 500. Validate up front to return a clean 400 instead.
+ */
+function assertUniqueThresholds(
+  tiers: { thresholdWeeks: number }[] | undefined,
+): void {
+  if (!tiers || tiers.length === 0) return;
+  const seen = new Set<number>();
+  for (const t of tiers) {
+    if (seen.has(t.thresholdWeeks)) {
+      throw new BadRequestException(
+        `Deux paliers ont la même durée (${t.thresholdWeeks} semaines)`,
+      );
+    }
+    seen.add(t.thresholdWeeks);
+  }
+}
+
+/**
+ * QUOTE / FREE services have no flat price and no loyalty surcharge. Force
+ * priceCents to 0 and drop any pricingTiers payload so the DB stays coherent
+ * regardless of what the client sent.
+ */
+function normalizePricingForMode<
+  T extends {
+    priceMode?: 'FIXED' | 'QUOTE' | 'FREE';
+    priceCents?: number;
+    pricingTiers?: { thresholdWeeks: number; surchargeCents: number }[];
+  },
+>(input: T): T {
+  if (input.priceMode && input.priceMode !== 'FIXED') {
+    return { ...input, priceCents: 0, pricingTiers: [] };
+  }
+  return input;
+}
+
 @Injectable()
 export class BusinessService {
   constructor(
@@ -29,10 +66,41 @@ export class BusinessService {
     private cacheService: CacheService,
   ) {}
 
-  private async invalidateBusinessCache(slug: string) {
-    await Promise.all([
+  private async invalidateBusinessCache(slug: string, ownerId?: string) {
+    // Only invalidate the precise slug key; search results stay cached until
+    // their 5 min TTL expires. A freshly edited business appearing in a
+    // result list with slightly stale name/phone for a few minutes is an
+    // acceptable tradeoff to keep the search cache hit rate high.
+    const ops: Promise<unknown>[] = [
       this.cacheService.del(CacheService.businessKey(slug)),
-      this.cacheService.delByPattern('search:business:*'),
+    ];
+    if (ownerId) {
+      ops.push(
+        this.cacheService.del(CacheService.businessMineKey(ownerId)),
+        this.cacheService.del(CacheService.businessOwnerPublicKey(ownerId)),
+        this.cacheService.delByPattern(`employees:business:*`), // safe net
+        this.cacheService.delByPattern(`reviews:business:*`),   // safe net
+      );
+    }
+    await Promise.all(ops);
+  }
+
+  /**
+   * Targeted invalidation when we know the businessId. Avoids the broad
+   * pattern wildcards that `invalidateBusinessCache` falls back to when only
+   * the slug is known.
+   */
+  private async invalidateBusinessScopedCache(params: {
+    slug: string;
+    ownerId: string;
+    businessId: string;
+  }) {
+    await Promise.all([
+      this.cacheService.del(CacheService.businessKey(params.slug)),
+      this.cacheService.del(CacheService.businessMineKey(params.ownerId)),
+      this.cacheService.del(CacheService.businessOwnerPublicKey(params.ownerId)),
+      this.cacheService.del(CacheService.employeesBusinessKey(params.businessId)),
+      this.cacheService.del(CacheService.reviewsBusinessKey(params.businessId)),
     ]);
   }
 
@@ -83,14 +151,26 @@ export class BusinessService {
       },
     });
 
-    // Invalidate search cache
-    await this.cacheService.delByPattern('search:business:*');
-
     return business;
   }
 
   async findByOwner(userId: string) {
-    const business = await this.prisma.business.findUnique({
+    // Returns null when the user has no business, so callers like the client
+    // booking page can use this as a "is current user a pro?" probe without
+    // producing a 404 in the network panel. Admin endpoints that require the
+    // business to exist should call findByOwnerOrThrow instead.
+    const cacheKey = CacheService.businessMineKey(userId);
+    type Result = Awaited<ReturnType<typeof this.findByOwnerUncached>>;
+    const cached = await this.cacheService.get<Result>(cacheKey);
+    if (cached) return cached;
+
+    const business = await this.findByOwnerUncached(userId);
+    await this.cacheService.set(cacheKey, business, CacheService.TTL.BUSINESS_OWNER);
+    return business;
+  }
+
+  private async findByOwnerUncached(userId: string) {
+    return this.prisma.business.findUnique({
       where: { ownerId: userId },
       include: {
         employees: {
@@ -109,6 +189,7 @@ export class BusinessService {
           include: {
             category: true,
             businessCategory: { include: { options: true } },
+            pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
           },
         },
         hours: {
@@ -132,16 +213,23 @@ export class BusinessService {
         },
       },
     });
+  }
 
+  /** Variant of findByOwner that throws 404 when the user has no business. */
+  async findByOwnerOrThrow(userId: string) {
+    const business = await this.findByOwner(userId);
     if (!business) {
       throw new NotFoundException('Business non trouvé');
     }
-
     return business;
   }
 
   /** Find business by owner ID (public endpoint) */
   async findByOwnerPublic(userId: string) {
+    const cacheKey = CacheService.businessOwnerPublicKey(userId);
+    const cached = await this.cacheService.get(cacheKey);
+    if (cached) return cached;
+
     const business = await this.prisma.business.findUnique({
       where: { ownerId: userId, isActive: true },
       include: {
@@ -162,6 +250,7 @@ export class BusinessService {
           include: {
             category: true,
             businessCategory: { include: { options: true } },
+            pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
           },
         },
         hours: {
@@ -184,6 +273,7 @@ export class BusinessService {
     });
 
     // Return null if no business found (not an error for public endpoint)
+    await this.cacheService.set(cacheKey, business, CacheService.TTL.BUSINESS_OWNER);
     return business;
   }
 
@@ -220,6 +310,7 @@ export class BusinessService {
           include: {
             category: true,
             businessCategory: { include: { options: true } },
+            pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
           },
         },
         hours: {
@@ -324,7 +415,7 @@ export class BusinessService {
       },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
 
     return updated;
   }
@@ -506,7 +597,13 @@ export class BusinessService {
       });
     }
 
-    // Get all matching businesses within bounding box
+    // Fetch a bounded candidate set from the bounding box. We can't apply
+    // Haversine inside SQL here (would need PostGIS), so we cap at 5x the
+    // requested page size with a hard ceiling — enough margin to absorb
+    // the bounding-box corners trimmed by Haversine without loading the
+    // whole city when the query matches thousands of businesses.
+    const candidateLimit = Math.min(Math.max(limit * 5, 100), 200);
+
     const candidates = await this.prisma.business.findMany({
       where,
       include: {
@@ -523,6 +620,10 @@ export class BusinessService {
           },
         },
       },
+      // Pre-sort cheaply by (lat, lng) so the top candidates are geographically
+      // clustered around the bounding box — keeps the fetched set relevant.
+      orderBy: [{ latitude: 'asc' }, { longitude: 'asc' }],
+      take: candidateLimit,
     });
 
     // Calculate actual distance using Haversine formula and filter
@@ -575,18 +676,26 @@ export class BusinessService {
       throw new NotFoundException('Business non trouvé');
     }
 
+    const normalized = normalizePricingForMode(dto);
+    const { pricingTiers, ...serviceData } = normalized;
+    assertUniqueThresholds(pricingTiers);
+
     const service = await this.prisma.businessService.create({
       data: {
-        ...dto,
+        ...serviceData,
         businessId: business.id,
+        ...(pricingTiers && pricingTiers.length > 0
+          ? { pricingTiers: { create: pricingTiers } }
+          : {}),
       },
       include: {
         category: true,
         businessCategory: { include: { options: true } },
+        pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
       },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return service;
   }
 
@@ -611,16 +720,41 @@ export class BusinessService {
       throw new ForbiddenException('Accès refusé');
     }
 
-    const updated = await this.prisma.businessService.update({
-      where: { id: serviceId },
-      data: dto,
-      include: {
-        category: true,
-        businessCategory: { include: { options: true } },
-      },
+    // If switching to QUOTE/FREE, drop any flat price + tiers regardless of
+    // what the client sent — these modes are price-less by definition.
+    const normalized = normalizePricingForMode(dto);
+    const { pricingTiers, ...serviceData } = normalized;
+    assertUniqueThresholds(pricingTiers);
+
+    // Full replacement of tiers when the field is provided. Skip entirely when
+    // undefined so callers can update a service without touching its tiers.
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (pricingTiers !== undefined) {
+        await tx.servicePricingTier.deleteMany({
+          where: { businessServiceId: serviceId },
+        });
+        if (pricingTiers.length > 0) {
+          await tx.servicePricingTier.createMany({
+            data: pricingTiers.map((t) => ({
+              businessServiceId: serviceId,
+              thresholdWeeks: t.thresholdWeeks,
+              surchargeCents: t.surchargeCents,
+            })),
+          });
+        }
+      }
+      return tx.businessService.update({
+        where: { id: serviceId },
+        data: serviceData,
+        include: {
+          category: true,
+          businessCategory: { include: { options: true } },
+          pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
+        },
+      });
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return updated;
   }
 
@@ -645,7 +779,7 @@ export class BusinessService {
       where: { id: serviceId },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return { success: true };
   }
 
@@ -660,6 +794,7 @@ export class BusinessService {
           },
         },
         businessCategory: { include: { options: true } },
+        pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
       },
     });
   }
@@ -718,7 +853,7 @@ export class BusinessService {
       ),
     ]);
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return this.getHours(business.id);
   }
 
@@ -778,7 +913,7 @@ export class BusinessService {
       include: { options: true },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return category;
   }
 
@@ -858,7 +993,7 @@ export class BusinessService {
       });
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return updated;
   }
 
@@ -889,7 +1024,7 @@ export class BusinessService {
       where: { id: categoryId },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return { success: true };
   }
 
@@ -918,7 +1053,7 @@ export class BusinessService {
       },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return updated;
   }
 
@@ -981,7 +1116,7 @@ export class BusinessService {
       },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return image;
   }
 
@@ -1012,7 +1147,7 @@ export class BusinessService {
       where: { id: imageId },
     });
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return { success: true };
   }
 
@@ -1035,7 +1170,7 @@ export class BusinessService {
       ),
     );
 
-    await this.invalidateBusinessCache(business.slug);
+    await this.invalidateBusinessCache(business.slug, business.ownerId);
     return this.getImages(business.id);
   }
 

@@ -8,6 +8,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { BookingsService } from './bookings.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -20,6 +21,7 @@ export class BookingsController {
   constructor(private bookingsService: BookingsService) {}
 
   @Post()
+  @Throttle({ booking: { ttl: 60_000, limit: 10 } })
   async create(@CurrentUser() user: User, @Body() dto: CreateBookingDto) {
     return this.bookingsService.create(user.id, dto);
   }
@@ -56,6 +58,22 @@ export class BookingsController {
     @Query('to') to?: string,
   ) {
     return this.bookingsService.findByUser(user.id, role, from, to);
+  }
+
+  /**
+   * Cheap probe used by the public business page: "does this user have a
+   * COMPLETED booking with this business that has not been reviewed yet?".
+   * Replaces a full /bookings/me fetch + client-side filter.
+   */
+  @Get('can-review')
+  async canReview(
+    @CurrentUser() user: User,
+    @Query('businessId') businessId: string,
+  ) {
+    return this.bookingsService.findReviewableBookingForBusiness(
+      user.id,
+      businessId,
+    );
   }
 
   @Get('revenue-stats')

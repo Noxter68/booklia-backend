@@ -8,14 +8,32 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   CreateEmployeeDto,
   UpdateEmployeeDto,
-  GetAvailableSlotsDto,
   CreateEmployeeExceptionDto,
   ListEmployeeExceptionsDto,
 } from './dto/employee.dto';
+import { CacheService } from '../cache/cache.service';
 
 @Injectable()
 export class EmployeesService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private cacheService: CacheService,
+  ) {}
+
+  private async invalidateBusinessEmployees(business: {
+    id: string;
+    slug: string;
+    ownerId: string;
+  }) {
+    // The full business payload (findBySlug, findByOwner, findByOwnerPublic)
+    // embeds the employees list, so editing staff must bust those caches too.
+    await Promise.all([
+      this.cacheService.del(CacheService.employeesBusinessKey(business.id)),
+      this.cacheService.del(CacheService.businessKey(business.slug)),
+      this.cacheService.del(CacheService.businessMineKey(business.ownerId)),
+      this.cacheService.del(CacheService.businessOwnerPublicKey(business.ownerId)),
+    ]);
+  }
 
   async create(userId: string, dto: CreateEmployeeDto) {
     const business = await this.prisma.business.findUnique({
@@ -55,10 +73,22 @@ export class EmployeesService {
       },
     });
 
+    await this.invalidateBusinessEmployees(business);
     return employee;
   }
 
   async findByBusiness(businessId: string) {
+    const cacheKey = CacheService.employeesBusinessKey(businessId);
+    type Result = Awaited<ReturnType<typeof this.findByBusinessUncached>>;
+    const cached = await this.cacheService.get<Result>(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.findByBusinessUncached(businessId);
+    await this.cacheService.set(cacheKey, result, CacheService.TTL.EMPLOYEES_BUSINESS);
+    return result;
+  }
+
+  private findByBusinessUncached(businessId: string) {
     return this.prisma.employee.findMany({
       where: { businessId },
       include: {
@@ -156,6 +186,7 @@ export class EmployeesService {
       });
     });
 
+    await this.invalidateBusinessEmployees(business);
     return updated;
   }
 
@@ -180,140 +211,168 @@ export class EmployeesService {
       where: { id: employeeId },
     });
 
+    await this.invalidateBusinessEmployees(business);
     return { success: true };
   }
 
-  async getAvailableSlots(dto: GetAvailableSlotsDto) {
-    const { employeeId, businessServiceId, date } = dto;
+  /**
+   * Returns slots for a date range in a single response. Backed by 5 DB
+   * queries total instead of 5 per day:
+   *   1× employee + weekly availabilities
+   *   1× service + pricing tiers
+   *   1× exceptions findMany over the range
+   *   1× bookings findMany over the range
+   *   1× last COMPLETED booking (parallel, for loyalty)
+   */
+  async getAvailableSlotsRange(
+    employeeId: string,
+    businessServiceId: string,
+    dateFrom: string,
+    dateTo: string,
+    requesterId: string | null = null,
+  ) {
+    const fromParts = dateFrom.split('-').map(Number);
+    const toParts = dateTo.split('-').map(Number);
+    const startOfRange = new Date(fromParts[0], fromParts[1] - 1, fromParts[2], 0, 0, 0, 0);
+    const endOfRange = new Date(toParts[0], toParts[1] - 1, toParts[2], 23, 59, 59, 999);
+    const startUtc = new Date(Date.UTC(fromParts[0], fromParts[1] - 1, fromParts[2]));
+    const endUtc = new Date(Date.UTC(toParts[0], toParts[1] - 1, toParts[2]));
 
-    // Get employee with ALL weekly availability slots (multiple per day now allowed)
-    const employee = await this.prisma.employee.findUnique({
-      where: { id: employeeId },
-      include: {
-        availabilities: true,
-      },
-    });
-
-    if (!employee) {
-      throw new NotFoundException('Employé non trouvé');
+    if (endOfRange.getTime() < startOfRange.getTime()) {
+      throw new BadRequestException('dateTo must be on or after dateFrom');
     }
 
-    // Get service duration
-    const service = await this.prisma.businessService.findUnique({
-      where: { id: businessServiceId },
-    });
+    const [employee, service, exceptions, bookingsOnRange, lastCompletedBooking] =
+      await Promise.all([
+        this.prisma.employee.findUnique({
+          where: { id: employeeId },
+          include: { availabilities: true },
+        }),
+        this.prisma.businessService.findUnique({
+          where: { id: businessServiceId },
+          include: { pricingTiers: { orderBy: { thresholdWeeks: 'asc' } } },
+        }),
+        this.prisma.employeeException.findMany({
+          where: {
+            employeeId,
+            date: { gte: startUtc, lte: endUtc },
+          },
+          include: { slots: true },
+        }),
+        this.prisma.booking.findMany({
+          where: {
+            employeeId,
+            scheduledAt: { gte: startOfRange, lte: endOfRange },
+            status: { in: ['PENDING', 'ACCEPTED'] },
+          },
+          include: { businessService: { select: { durationMinutes: true } } },
+        }),
+        requesterId
+          ? this.prisma.booking.findFirst({
+              where: {
+                requesterId,
+                businessServiceId,
+                status: 'COMPLETED',
+              },
+              orderBy: { scheduledAt: 'desc' },
+              select: { scheduledAt: true },
+            })
+          : Promise.resolve(null),
+      ]);
 
-    if (!service) {
-      throw new NotFoundException('Service non trouvé');
+    if (!employee) throw new NotFoundException('Employé non trouvé');
+    if (!service) throw new NotFoundException('Service non trouvé');
+
+    // Index exceptions by their UTC date midnight (matches @db.Date semantics).
+    const exceptionByKey = new Map<string, (typeof exceptions)[number]>();
+    for (const exc of exceptions) {
+      exceptionByKey.set(exc.date.toISOString().slice(0, 10), exc);
     }
 
-    // Parse date as local time (add T00:00:00 to avoid UTC interpretation)
-    const [year, month, day] = date.split('-').map(Number);
-    const targetDate = new Date(year, month - 1, day);
-    const dayOfWeek = targetDate.getDay();
-
-    // Check for a date-specific exception (closure or custom time slots).
-    // @db.Date columns expect midnight UTC; pass the same instant in all envs.
-    const exceptionDate = new Date(Date.UTC(year, month - 1, day));
-    const exception = await this.prisma.employeeException.findUnique({
-      where: { employeeId_date: { employeeId, date: exceptionDate } },
-      include: { slots: true },
-    });
-
-    // If explicitly closed on that date, no slots available
-    if (exception?.isClosed) {
-      return { slots: [] };
-    }
-
-    // Resolve effective time ranges. An exception with slots overrides the
-    // weekly schedule entirely; otherwise fall back to the weekly rows.
-    type Range = { startTime: string; endTime: string };
-    let ranges: Range[];
-    if (exception && exception.slots.length > 0) {
-      ranges = exception.slots.map((s) => ({
-        startTime: s.startTime,
-        endTime: s.endTime,
-      }));
-    } else {
-      ranges = employee.availabilities
-        .filter((a) => a.dayOfWeek === dayOfWeek)
-        .map((a) => ({ startTime: a.startTime, endTime: a.endTime }));
-    }
-
-    if (ranges.length === 0) {
-      return { slots: [] };
-    }
-
-    // Get existing bookings for this employee on this date
-    const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
-    const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
-
-    const existingBookings = await this.prisma.booking.findMany({
-      where: {
-        employeeId,
-        scheduledAt: { gte: startOfDay, lte: endOfDay },
-        status: { in: ['PENDING', 'ACCEPTED'] },
-      },
-      include: {
-        businessService: { select: { durationMinutes: true } },
-      },
-    });
-
-    // Helpers
     const slotDuration = service.durationMinutes;
     const toMinutes = (hhmm: string) => {
       const [h, m] = hhmm.split(':').map(Number);
       return h * 60 + m;
     };
-
-    // Today's cutoff so past slots appear as unavailable
     const now = new Date();
-    const isToday =
-      now.getFullYear() === year &&
-      now.getMonth() === month - 1 &&
-      now.getDate() === day;
-    const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
-    // Generate slots for each range, then merge + sort + dedupe
-    const slotsMap = new Map<string, { time: string; available: boolean }>();
+    // Iterate one day at a time, in local time.
+    const days: { date: string; slots: { time: string; available: boolean }[] }[] = [];
+    const cursor = new Date(startOfRange);
+    while (cursor.getTime() <= endOfRange.getTime()) {
+      const year = cursor.getFullYear();
+      const month = cursor.getMonth() + 1;
+      const day = cursor.getDate();
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const exception = exceptionByKey.get(dateStr) ?? null;
 
-    for (const { startTime, endTime } of ranges) {
-      const startMin = toMinutes(startTime);
-      const endMin = toMinutes(endTime);
-      if (endMin <= startMin) continue; // defensive
+      const dayResult = (() => {
+        if (exception?.isClosed) return [];
 
-      for (let cur = startMin; cur + slotDuration <= endMin; cur += 30) {
-        const hour = Math.floor(cur / 60);
-        const min = cur % 60;
-        const timeStr = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+        type Range = { startTime: string; endTime: string };
+        const ranges: Range[] =
+          exception && exception.slots.length > 0
+            ? exception.slots.map((s) => ({ startTime: s.startTime, endTime: s.endTime }))
+            : employee.availabilities
+                .filter((a) => a.dayOfWeek === cursor.getDay())
+                .map((a) => ({ startTime: a.startTime, endTime: a.endTime }));
 
-        const isPast = isToday && cur <= nowMinutes;
+        if (ranges.length === 0) return [];
 
-        const slotStart = new Date(year, month - 1, day, hour, min, 0, 0);
-        const slotEnd = new Date(slotStart.getTime() + slotDuration * 60000);
+        const isToday =
+          now.getFullYear() === year &&
+          now.getMonth() === month - 1 &&
+          now.getDate() === day;
+        const nowMinutes = now.getHours() * 60 + now.getMinutes();
 
-        const isBooked = existingBookings.some((booking) => {
-          if (!booking.scheduledAt) return false;
-          let bookingEnd = booking.scheduledEndAt;
-          if (!bookingEnd && booking.businessService?.durationMinutes) {
-            bookingEnd = new Date(
-              booking.scheduledAt.getTime() +
-                booking.businessService.durationMinutes * 60000,
-            );
+        const slotsMap = new Map<string, { time: string; available: boolean }>();
+        for (const { startTime, endTime } of ranges) {
+          const startMin = toMinutes(startTime);
+          const endMin = toMinutes(endTime);
+          if (endMin <= startMin) continue;
+
+          for (let cur = startMin; cur + slotDuration <= endMin; cur += 30) {
+            const hour = Math.floor(cur / 60);
+            const min = cur % 60;
+            const timeStr = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+            const isPast = isToday && cur <= nowMinutes;
+
+            const slotStart = new Date(year, month - 1, day, hour, min, 0, 0);
+            const slotEnd = new Date(slotStart.getTime() + slotDuration * 60000);
+
+            const isBooked = bookingsOnRange.some((b) => {
+              if (!b.scheduledAt) return false;
+              let bEnd = b.scheduledEndAt;
+              if (!bEnd && b.businessService?.durationMinutes) {
+                bEnd = new Date(
+                  b.scheduledAt.getTime() + b.businessService.durationMinutes * 60000,
+                );
+              }
+              if (!bEnd) return false;
+              return slotStart < bEnd && slotEnd > b.scheduledAt;
+            });
+
+            slotsMap.set(timeStr, { time: timeStr, available: !isBooked && !isPast });
           }
-          if (!bookingEnd) return false;
-          return slotStart < bookingEnd && slotEnd > booking.scheduledAt;
-        });
+        }
 
-        slotsMap.set(timeStr, { time: timeStr, available: !isBooked && !isPast });
-      }
+        return Array.from(slotsMap.values()).sort((a, b) => a.time.localeCompare(b.time));
+      })();
+
+      days.push({ date: dateStr, slots: dayResult });
+      cursor.setDate(cursor.getDate() + 1);
     }
 
-    const slots = Array.from(slotsMap.values()).sort((a, b) =>
-      a.time.localeCompare(b.time),
-    );
-
-    return { slots };
+    return {
+      days,
+      loyalty: {
+        lastCompletedAt: lastCompletedBooking?.scheduledAt ?? null,
+        pricingTiers: service.pricingTiers.map((t) => ({
+          thresholdWeeks: t.thresholdWeeks,
+          surchargeCents: t.surchargeCents,
+        })),
+      },
+    };
   }
 
   // ============================================

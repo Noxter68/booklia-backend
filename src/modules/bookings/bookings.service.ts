@@ -13,6 +13,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { WebsocketGateway } from '../websocket/websocket.gateway';
 import { ClientsService } from '../clients/clients.service';
 import { CacheService } from '../cache/cache.service';
+import { computeLoyaltySurcharge } from './pricing.helper';
 
 @Injectable()
 export class BookingsService {
@@ -27,18 +28,33 @@ export class BookingsService {
   ) {}
 
   async create(userId: string, dto: CreateBookingDto) {
-    // Fetch business service with its category's allowed options
-    const businessService = await this.prisma.businessService.findUnique({
-      where: { id: dto.businessServiceId },
-      include: {
-        business: {
-          include: { owner: true },
-        },
-        businessCategory: {
-          include: { options: true },
-        },
-      },
-    });
+    // Run all independent reads in parallel: service (with tiers + options),
+    // employee, the requester's own business (to block pro accounts) and the
+    // last COMPLETED booking for loyalty pricing. The "last completed" query
+    // is backed by the (requesterId, businessServiceId, status, scheduledAt)
+    // composite index — single indexed lookup on a separate connection.
+    const [businessService, employee, userBusiness, lastCompletedBooking] =
+      await Promise.all([
+        this.prisma.businessService.findUnique({
+          where: { id: dto.businessServiceId },
+          include: {
+            business: { include: { owner: true } },
+            businessCategory: { include: { options: true } },
+            pricingTiers: { orderBy: { thresholdWeeks: 'asc' } },
+          },
+        }),
+        this.prisma.employee.findUnique({ where: { id: dto.employeeId } }),
+        this.prisma.business.findUnique({ where: { ownerId: userId } }),
+        this.prisma.booking.findFirst({
+          where: {
+            requesterId: userId,
+            businessServiceId: dto.businessServiceId,
+            status: 'COMPLETED',
+          },
+          orderBy: { scheduledAt: 'desc' },
+          select: { scheduledAt: true },
+        }),
+      ]);
 
     if (!businessService) {
       throw new NotFoundException('Business service not found');
@@ -50,11 +66,6 @@ export class BookingsService {
       );
     }
 
-    // Fetch employee
-    const employee = await this.prisma.employee.findUnique({
-      where: { id: dto.employeeId },
-    });
-
     if (!employee) {
       throw new NotFoundException('Employee not found');
     }
@@ -64,9 +75,6 @@ export class BookingsService {
     }
 
     // Business owners cannot book appointments
-    const userBusiness = await this.prisma.business.findUnique({
-      where: { ownerId: userId },
-    });
     if (userBusiness) {
       throw new ForbiddenException(
         'Les comptes professionnels ne peuvent pas effectuer de réservations. Veuillez utiliser un compte client.',
@@ -121,7 +129,6 @@ export class BookingsService {
     );
     const totalDurationMinutes =
       businessService.durationMinutes + optionsTotalMinutes;
-    const totalPriceCents = businessService.priceCents + optionsTotalCents;
 
     // Calculate scheduledEndAt based on total duration (service + options)
     let scheduledAt: Date | undefined;
@@ -130,6 +137,26 @@ export class BookingsService {
       scheduledAt = new Date(dto.scheduledAt);
       scheduledEndAt = new Date(scheduledAt.getTime() + totalDurationMinutes * 60000);
     }
+
+    // Loyalty surcharge only applies to FIXED-priced services. Computed
+    // server-side from authoritative tiers + COMPLETED-bookings history,
+    // never trusting any price value sent by the client.
+    const isFixedPrice = businessService.priceMode === 'FIXED';
+    const { surchargeCents, appliedTierWeeks } =
+      isFixedPrice && scheduledAt
+        ? computeLoyaltySurcharge(
+            businessService.pricingTiers,
+            lastCompletedBooking?.scheduledAt ?? null,
+            scheduledAt,
+          )
+        : { surchargeCents: 0, appliedTierWeeks: null };
+
+    // QUOTE: agreedPriceCents stays null (the pro will set it later).
+    // FREE / FIXED: store the computed total (service + options + surcharge).
+    const agreedPriceCents =
+      businessService.priceMode === 'QUOTE'
+        ? null
+        : businessService.priceCents + optionsTotalCents + surchargeCents;
 
     // Check if business has auto-accept enabled
     const autoAccept = businessService.business.autoAcceptBookings;
@@ -141,7 +168,8 @@ export class BookingsService {
         providerId: businessService.business.ownerId,
         businessServiceId: dto.businessServiceId,
         employeeId: dto.employeeId,
-        agreedPriceCents: totalPriceCents,
+        agreedPriceCents,
+        appliedTierWeeks,
         scheduledAt,
         scheduledEndAt,
         ...(autoAccept && { status: BookingStatus.ACCEPTED }),
@@ -219,6 +247,7 @@ export class BookingsService {
       .ensureClient(businessService.businessId, userId)
       .catch(() => {});
 
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
     return booking;
   }
 
@@ -251,6 +280,7 @@ export class BookingsService {
       status: BookingStatus.ACCEPTED,
     });
 
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
     return updated;
   }
 
@@ -278,6 +308,7 @@ export class BookingsService {
         .catch(() => {});
     }
 
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
     return updated;
   }
 
@@ -313,6 +344,12 @@ export class BookingsService {
       }
     }
 
+    // The cron may have flipped many bookings across many users — wipe the
+    // whole bookings cache rather than hand-tracking each affected user.
+    if (results.some((r) => r.success)) {
+      await this.cacheService.delByPattern('bookings:user:*');
+    }
+
     return { processed: results.length, results };
   }
 
@@ -323,7 +360,7 @@ export class BookingsService {
   private async autoCompleteExpiredForUser(userId: string) {
     const now = new Date();
 
-    await this.prisma.booking.updateMany({
+    const result = await this.prisma.booking.updateMany({
       where: {
         status: { in: [BookingStatus.ACCEPTED, BookingStatus.PENDING] },
         kind: CalendarEntryKind.APPOINTMENT,
@@ -335,6 +372,7 @@ export class BookingsService {
         completedAt: now,
       },
     });
+    return result.count;
   }
 
   async cancel(userId: string, bookingId: string) {
@@ -382,6 +420,7 @@ export class BookingsService {
       status: BookingStatus.CANCELED,
     });
 
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
     return updated;
   }
 
@@ -396,9 +435,11 @@ export class BookingsService {
       throw new BadRequestException('Only canceled bookings can be deleted');
     }
 
-    return this.prisma.booking.delete({
+    const deleted = await this.prisma.booking.delete({
       where: { id: bookingId },
     });
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
+    return deleted;
   }
 
   async reject(userId: string, bookingId: string, message?: string) {
@@ -437,13 +478,35 @@ export class BookingsService {
       rejectionMessage: message,
     });
 
+    await this.invalidateUserBookingsCache(booking.requesterId, booking.providerId);
     return updated;
   }
 
   async findByUser(userId: string, role?: 'requester' | 'provider', from?: string, to?: string) {
-    // First, auto-complete any expired ACCEPTED bookings for this user
-    await this.autoCompleteExpiredForUser(userId);
+    // First, auto-complete any expired ACCEPTED bookings for this user. If
+    // anything was actually flipped, the bookings cache for this user is now
+    // stale and must be busted before serving from it.
+    const autoCompleted = await this.autoCompleteExpiredForUser(userId);
+    if (autoCompleted > 0) {
+      await this.invalidateUserBookingsCache(userId);
+    }
 
+    const cacheKey = CacheService.bookingsUserKey(userId, role, from, to);
+    type Result = Awaited<ReturnType<typeof this.findByUserUncached>>;
+    const cached = await this.cacheService.get<Result>(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.findByUserUncached(userId, role, from, to);
+    await this.cacheService.set(cacheKey, result, CacheService.TTL.BOOKINGS_USER);
+    return result;
+  }
+
+  private async findByUserUncached(
+    userId: string,
+    role?: 'requester' | 'provider',
+    from?: string,
+    to?: string,
+  ) {
     const where: any = {};
 
     if (role === 'requester') {
@@ -495,6 +558,44 @@ export class BookingsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * Returns the most recent completed-but-unreviewed booking for `userId`
+   * with `businessId`, or null. Used as a cheap probe instead of fetching
+   * /bookings/me and filtering client-side.
+   */
+  async findReviewableBookingForBusiness(userId: string, businessId: string) {
+    if (!businessId) return null;
+    const booking = await this.prisma.booking.findFirst({
+      where: {
+        requesterId: userId,
+        status: BookingStatus.COMPLETED,
+        businessService: { businessId },
+        reviews: { none: { type: 'REVIEW_PROVIDER' } },
+      },
+      orderBy: { completedAt: 'desc' },
+      select: {
+        id: true,
+        completedAt: true,
+        businessService: { select: { id: true, name: true } },
+      },
+    });
+    return booking;
+  }
+
+  /**
+   * Invalidate every cached `/bookings/me` variant for one or two users.
+   * Mutations that touch a booking can affect both the requester and the
+   * provider, so callers usually pass both IDs.
+   */
+  private async invalidateUserBookingsCache(...userIds: (string | null | undefined)[]) {
+    const unique = Array.from(new Set(userIds.filter((u): u is string => !!u)));
+    await Promise.all(
+      unique.map((id) =>
+        this.cacheService.delByPattern(`bookings:user:${id}:*`),
+      ),
+    );
   }
 
   async findOne(bookingId: string) {

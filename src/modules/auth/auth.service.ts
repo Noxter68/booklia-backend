@@ -42,6 +42,7 @@ export class AuthService {
       data: {
         email: dto.email,
         name: `${dto.firstName} ${dto.lastName}`,
+        birthDate: new Date(dto.birthDate),
       },
     });
 

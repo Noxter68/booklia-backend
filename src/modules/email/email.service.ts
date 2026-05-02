@@ -29,6 +29,23 @@ import {
   buildInvoiceSentEmail,
 } from './templates/invoice-sent';
 
+// Retry transient Resend failures (rate limits, 5xx, network blips).
+// Permanent errors (bad address, 4xx other than 429) bail out immediately.
+const MAX_ATTEMPTS = 3;
+const BACKOFF_MS = [500, 2000]; // delays before attempts 2 and 3
+
+function isTransientError(err: unknown): boolean {
+  const e = err as { statusCode?: number; name?: string };
+  if (e?.statusCode === 429) return true;
+  if (e?.statusCode && e.statusCode >= 500) return true;
+  if (e?.name === 'rate_limit_exceeded') return true;
+  // Network errors (no statusCode at all) are usually transient too.
+  if (!e?.statusCode) return true;
+  return false;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -41,40 +58,62 @@ export class EmailService {
       config.get<string>('RESEND_FROM_EMAIL') || 'Booklia <noreply@booklia.fr>';
   }
 
-  /**
-   * Sends an email via Resend. Logs errors but never throws,
-   * so email failures don't break the main application flow.
-   */
-  private async send(
-    to: string,
-    subject: string,
-    html: string,
-  ): Promise<void> {
-    try {
-      const { error } = await this.resend.emails.send({
-        from: this.fromEmail,
-        to,
-        subject,
-        html,
-      });
-
-      if (error) {
-        this.logger.error(
-          `Failed to send email to ${to}: ${error.message}`,
-          error,
-        );
-        return;
-      }
-
-      this.logger.log(`Email sent to ${to}: "${subject}"`);
-    } catch (err) {
-      this.logger.error(`Unexpected error sending email to ${to}`, err);
-    }
+  private async sendOnce(payload: Parameters<Resend['emails']['send']>[0]) {
+    const { error } = await this.resend.emails.send(payload);
+    if (error) throw error;
   }
 
   /**
-   * Sends an email with a single file attachment. Throws on failure so callers
-   * can surface the error to the user (e.g., invoice-send button).
+   * Sends through Resend with retry on transient failures. Returns true on
+   * success, false otherwise. Never throws — callers can choose to surface
+   * the failure (e.g. mark a reminder as not yet sent so it gets retried by
+   * the next cron tick).
+   */
+  private async sendWithRetry(
+    to: string,
+    subject: string,
+    payload: Parameters<Resend['emails']['send']>[0],
+  ): Promise<boolean> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        await this.sendOnce(payload);
+        if (attempt > 1) {
+          this.logger.log(
+            `Email to ${to} sent on attempt ${attempt}: "${subject}"`,
+          );
+        } else {
+          this.logger.log(`Email sent to ${to}: "${subject}"`);
+        }
+        return true;
+      } catch (err) {
+        lastError = err;
+        if (attempt === MAX_ATTEMPTS || !isTransientError(err)) break;
+        await sleep(BACKOFF_MS[attempt - 1] ?? 2000);
+      }
+    }
+    this.logger.error(
+      `Failed to send email to ${to} after ${MAX_ATTEMPTS} attempt(s): ${
+        (lastError as { message?: string })?.message ?? lastError
+      }`,
+      lastError,
+    );
+    return false;
+  }
+
+  /** Sends a plain email. Returns success/failure. Never throws. */
+  private send(to: string, subject: string, html: string): Promise<boolean> {
+    return this.sendWithRetry(to, subject, {
+      from: this.fromEmail,
+      to,
+      subject,
+      html,
+    });
+  }
+
+  /**
+   * Sends an email with an attachment. Throws on persistent failure so
+   * callers (e.g. the invoice-send button) can report it to the user.
    */
   private async sendWithAttachment(
     to: string,
@@ -82,37 +121,43 @@ export class EmailService {
     html: string,
     attachment: { filename: string; content: Buffer },
   ): Promise<void> {
-    const { error } = await this.resend.emails.send({
+    const ok = await this.sendWithRetry(to, subject, {
       from: this.fromEmail,
       to,
       subject,
       html,
       attachments: [
-        {
-          filename: attachment.filename,
-          content: attachment.content,
-        },
+        { filename: attachment.filename, content: attachment.content },
       ],
     });
-
-    if (error) {
-      this.logger.error(
-        `Failed to send email with attachment to ${to}: ${error.message}`,
-        error,
-      );
-      throw new Error(error.message || 'Email delivery failed');
-    }
-
-    this.logger.log(`Email with attachment sent to ${to}: "${subject}"`);
+    if (!ok) throw new Error('Email delivery failed');
   }
 
-  /** Sends a booking confirmation email to the client. */
+  /** Fire-and-forget variant of sendWithAttachment — returns boolean. */
+  private async sendWithAttachmentSafe(
+    to: string,
+    subject: string,
+    html: string,
+    attachment: { filename: string; content: Buffer },
+  ): Promise<boolean> {
+    return this.sendWithRetry(to, subject, {
+      from: this.fromEmail,
+      to,
+      subject,
+      html,
+      attachments: [
+        { filename: attachment.filename, content: attachment.content },
+      ],
+    });
+  }
+
+  /** Sends a booking confirmation email to the client, with .ics attached. */
   async sendBookingAccepted(
     to: string,
     data: BookingAcceptedData,
   ): Promise<void> {
-    const { subject, html } = buildBookingAcceptedEmail(data);
-    await this.send(to, subject, html);
+    const { subject, html, icsAttachment } = buildBookingAcceptedEmail(data);
+    await this.sendWithAttachmentSafe(to, subject, html, icsAttachment);
   }
 
   /** Sends a booking cancellation email to the client. */
@@ -124,13 +169,18 @@ export class EmailService {
     await this.send(to, subject, html);
   }
 
-  /** Sends a 24h reminder email to the client. */
+  /**
+   * Sends a 24h reminder email to the client, with .ics attached. Returns
+   * true on success, false if Resend ultimately rejected. The cron uses this
+   * boolean to decide whether to mark the booking as reminded — never mark a
+   * failed send as done, otherwise the next tick won't retry.
+   */
   async sendBookingReminder(
     to: string,
     data: BookingReminderData,
-  ): Promise<void> {
-    const { subject, html } = buildBookingReminderEmail(data);
-    await this.send(to, subject, html);
+  ): Promise<boolean> {
+    const { subject, html, icsAttachment } = buildBookingReminderEmail(data);
+    return this.sendWithAttachmentSafe(to, subject, html, icsAttachment);
   }
 
   /** Sends an email verification link. */

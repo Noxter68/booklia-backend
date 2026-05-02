@@ -26,6 +26,11 @@ export class BillingSettingsService {
       invoicePrefix: dto.invoicePrefix,
       logoKey: dto.logoKey ?? null,
       paymentTerms: dto.paymentTerms ?? null,
+      legalForm: dto.legalForm ?? null,
+      urssafRate: dto.urssafRate ?? null,
+      incomeTaxRate: dto.incomeTaxRate ?? null,
+      acreActive: dto.acreActive ?? false,
+      acreEndDate: dto.acreEndDate ? new Date(dto.acreEndDate) : null,
     };
 
     return this.prisma.businessBillingSettings.upsert({

@@ -176,6 +176,7 @@ model Business {
   billingSettings  BusinessBillingSettings?
   invoices         Invoice[]
   batchGenerations BatchGeneration[]
+  expenses         Expense[]
 
   // Referrals proposed by this business
   referrals Referral[]
@@ -662,6 +663,28 @@ enum VatMode {
   STANDARD
 }
 
+enum LegalForm {
+  AUTOENTREPRENEUR_BIC_SERVICE
+  AUTOENTREPRENEUR_BIC_VENTE
+  AUTOENTREPRENEUR_BNC
+  EI
+  EURL
+  SASU
+  SARL
+  OTHER
+}
+
+enum ExpenseCategory {
+  URSSAF
+  RENT
+  MATERIAL
+  SUPPLIER_ORDER
+  INSURANCE
+  SOFTWARE
+  MARKETING
+  OTHER
+}
+
 // FIXED  — flat priceCents charged at booking time (default behavior).
 // QUOTE  — "Sur devis": no upfront price, the pro fixes the amount later.
 // FREE   — Free / discovery appointment: no charge.
@@ -731,11 +754,40 @@ model BusinessBillingSettings {
   logoKey             String?
   paymentTerms        String?
 
+  // Accounting parameters (used by the accounting tab to compute provisions / net)
+  legalForm     LegalForm?
+  urssafRate    Float? // 0..1 (e.g. 0.212). When null, no URSSAF provision is computed.
+  incomeTaxRate Float? // optional: versement libératoire or estimated IR rate
+  acreActive    Boolean    @default(false)
+  acreEndDate   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Relations
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+}
+
+// Manually-entered business expense (rent, supplies, URSSAF payments, etc.).
+// Used by the accounting module for cash-flow tracking; not deductible
+// for micro-entrepreneur tax regime but still useful for the pro's overview.
+model Expense {
+  id          String          @id @default(cuid())
+  businessId  String
+  date        DateTime
+  category    ExpenseCategory
+  description String
+  amountCents Int
+  reference   String? // optional supplier invoice number / reference
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, date])
+  @@index([businessId, category])
 }
 
 model Invoice {

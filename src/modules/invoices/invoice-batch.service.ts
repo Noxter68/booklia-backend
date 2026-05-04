@@ -233,7 +233,10 @@ export class InvoiceBatchService {
   ) {
     return this.prisma.booking.findMany({
       where: {
-        businessService: { businessId },
+        // QUOTE / FREE services don't carry a flat price and shouldn't enter
+        // the bulk billing pipeline — the pro creates invoices manually for
+        // those (which doubles as their quote workflow).
+        businessService: { businessId, priceMode: 'FIXED' },
         status: { in: ['COMPLETED', 'ACCEPTED'] },
         scheduledAt: { gte: startDate, lte: endDate },
         // No existing invoice

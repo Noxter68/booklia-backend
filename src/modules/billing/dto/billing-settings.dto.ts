@@ -2,6 +2,11 @@ import {
   IsString,
   IsOptional,
   IsEnum,
+  IsBoolean,
+  IsNumber,
+  IsISO8601,
+  Min,
+  Max,
   MinLength,
   MaxLength,
   Matches,
@@ -10,6 +15,17 @@ import {
 enum VatMode {
   FRANCHISE_293B = 'FRANCHISE_293B',
   STANDARD = 'STANDARD',
+}
+
+enum LegalForm {
+  AUTOENTREPRENEUR_BIC_SERVICE = 'AUTOENTREPRENEUR_BIC_SERVICE',
+  AUTOENTREPRENEUR_BIC_VENTE = 'AUTOENTREPRENEUR_BIC_VENTE',
+  AUTOENTREPRENEUR_BNC = 'AUTOENTREPRENEUR_BNC',
+  EI = 'EI',
+  EURL = 'EURL',
+  SASU = 'SASU',
+  SARL = 'SARL',
+  OTHER = 'OTHER',
 }
 
 export class UpsertBillingSettingsDto {
@@ -62,4 +78,29 @@ export class UpsertBillingSettingsDto {
   @IsOptional()
   @IsString()
   paymentTerms?: string;
+
+  // Accounting parameters
+  @IsOptional()
+  @IsEnum(LegalForm)
+  legalForm?: LegalForm;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  urssafRate?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  incomeTaxRate?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  acreActive?: boolean;
+
+  @IsOptional()
+  @IsISO8601()
+  acreEndDate?: string;
 }

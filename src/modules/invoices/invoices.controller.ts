@@ -239,4 +239,14 @@ export class InvoicesController {
     const publicUrl = process.env.R2_PUBLIC_URL || '';
     return { url: `${publicUrl}/${invoice.pdfKey}` };
   }
+
+  @Post(':id/send-email')
+  async sendEmail(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { email?: string } = {},
+  ) {
+    const businessId = await this.getBusinessId(req.user.id);
+    return this.invoicesService.sendToClient(businessId, id, body?.email);
+  }
 }

@@ -76,6 +76,20 @@ const translations = {
       `Vérifiez votre identité — ${appName}`,
     adminInvitePreview: (appName: string) =>
       `Un administrateur de ${appName} vous invite à vérifier votre identité.`,
+
+    // Invoice sent
+    invoiceSentTitle: 'Votre facture est disponible',
+    invoiceSentBody: (clientName: string, businessName: string, invoiceNumber: string) =>
+      `Bonjour ${clientName},<br><strong>${businessName}</strong> vous a transmis la facture <strong>${invoiceNumber}</strong>. Vous la trouverez en pièce jointe de cet email.`,
+    invoiceSentFooter:
+      "Conservez cette facture pour vos archives. Pour toute question, contactez directement votre prestataire.",
+    invoiceSentSubject: (businessName: string, invoiceNumber: string) =>
+      `Facture ${invoiceNumber} — ${businessName}`,
+    invoiceSentPreview: (businessName: string) =>
+      `Votre facture ${businessName} est disponible en pièce jointe.`,
+    invoiceNumber: 'N° de facture',
+    invoiceDate: 'Date d\'émission',
+    invoiceTotal: 'Total',
   },
   en: {
     autoEmail: 'This email was sent automatically by Booklia.',
@@ -143,6 +157,20 @@ const translations = {
       `Verify your identity — ${appName}`,
     adminInvitePreview: (appName: string) =>
       `An administrator at ${appName} has invited you to verify your identity.`,
+
+    // Invoice sent
+    invoiceSentTitle: 'Your invoice is ready',
+    invoiceSentBody: (clientName: string, businessName: string, invoiceNumber: string) =>
+      `Hello ${clientName},<br><strong>${businessName}</strong> has sent you invoice <strong>${invoiceNumber}</strong>. You'll find it attached to this email.`,
+    invoiceSentFooter:
+      'Please keep this invoice for your records. For any questions, contact your provider directly.',
+    invoiceSentSubject: (businessName: string, invoiceNumber: string) =>
+      `Invoice ${invoiceNumber} — ${businessName}`,
+    invoiceSentPreview: (businessName: string) =>
+      `Your invoice from ${businessName} is attached.`,
+    invoiceNumber: 'Invoice number',
+    invoiceDate: 'Issue date',
+    invoiceTotal: 'Total',
   },
   pt: {
     autoEmail: 'Este email foi enviado automaticamente pelo Booklia.',
@@ -210,6 +238,20 @@ const translations = {
       `Verifique sua identidade — ${appName}`,
     adminInvitePreview: (appName: string) =>
       `Um administrador do ${appName} convidou você a verificar sua identidade.`,
+
+    // Invoice sent
+    invoiceSentTitle: 'Sua fatura está disponível',
+    invoiceSentBody: (clientName: string, businessName: string, invoiceNumber: string) =>
+      `Olá ${clientName},<br><strong>${businessName}</strong> enviou a fatura <strong>${invoiceNumber}</strong>. Você a encontrará em anexo neste email.`,
+    invoiceSentFooter:
+      'Guarde esta fatura para seus registros. Em caso de dúvidas, entre em contato diretamente com seu prestador.',
+    invoiceSentSubject: (businessName: string, invoiceNumber: string) =>
+      `Fatura ${invoiceNumber} — ${businessName}`,
+    invoiceSentPreview: (businessName: string) =>
+      `Sua fatura de ${businessName} está em anexo.`,
+    invoiceNumber: 'Número da fatura',
+    invoiceDate: 'Data de emissão',
+    invoiceTotal: 'Total',
   },
 } as const;
 

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsEmail, MaxLength, MinLength } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsEmail, MaxLength, MinLength, IsISO8601 } from 'class-validator';
 
 export class CreateBusinessClientDto {
   @IsString()
@@ -22,6 +22,10 @@ export class CreateBusinessClientDto {
   @IsOptional()
   @MaxLength(2000)
   notes?: string;
+
+  @IsISO8601()
+  @IsOptional()
+  birthDate?: string;
 }
 
 export class UpdateBusinessClientDto {
@@ -41,4 +45,8 @@ export class UpdateBusinessClientDto {
   @IsString()
   @IsOptional()
   address?: string;
+
+  @IsISO8601()
+  @IsOptional()
+  birthDate?: string;
 }

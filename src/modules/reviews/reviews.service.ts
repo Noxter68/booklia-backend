@@ -8,18 +8,27 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CreateReviewDto } from './dto/create-review.dto';
 import { BookingStatus, ReviewType } from '@prisma/client';
+import { CacheService } from '../cache/cache.service';
 
 @Injectable()
 export class ReviewsService {
   constructor(
     private prisma: PrismaService,
     private notificationsService: NotificationsService,
+    private cacheService: CacheService,
   ) {}
+
+  private invalidateBusinessReviews(businessId: string) {
+    return this.cacheService.del(CacheService.reviewsBusinessKey(businessId));
+  }
 
   async create(userId: string, dto: CreateReviewDto) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: dto.bookingId },
-      include: { reviews: true },
+      include: {
+        reviews: true,
+        businessService: { select: { businessId: true } },
+      },
     });
 
     if (!booking) {
@@ -66,6 +75,9 @@ export class ReviewsService {
       dto.bookingId,
     );
 
+    if (booking.businessService?.businessId) {
+      await this.invalidateBusinessReviews(booking.businessService.businessId);
+    }
     return review;
   }
 
@@ -90,6 +102,17 @@ export class ReviewsService {
   }
 
   async findByBusiness(businessId: string) {
+    const cacheKey = CacheService.reviewsBusinessKey(businessId);
+    type Result = Awaited<ReturnType<typeof this.findByBusinessUncached>>;
+    const cached = await this.cacheService.get<Result>(cacheKey);
+    if (cached) return cached;
+
+    const result = await this.findByBusinessUncached(businessId);
+    await this.cacheService.set(cacheKey, result, CacheService.TTL.REVIEWS_BUSINESS);
+    return result;
+  }
+
+  private async findByBusinessUncached(businessId: string) {
     const business = await this.prisma.business.findUnique({
       where: { id: businessId },
       select: { ownerId: true },
@@ -151,12 +174,15 @@ export class ReviewsService {
       throw new ForbiddenException('Only the business owner can reply to reviews');
     }
 
-    return this.prisma.review.update({
+    const updated = await this.prisma.review.update({
       where: { id: reviewId },
       data: {
         reply,
         repliedAt: new Date(),
       },
     });
+
+    await this.invalidateBusinessReviews(review.booking.businessService.business.id);
+    return updated;
   }
 }

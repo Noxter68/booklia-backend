@@ -10,11 +10,17 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
 
   // Default TTL values in seconds
   static readonly TTL = {
-    SEARCH: 60, // 1 minute for search results
+    SEARCH: 300, // 5 minutes — search results change slowly; 5 min is an
+                 // acceptable staleness window for a freshly updated business
+                 // to appear, and buys a much higher cache hit rate.
     CATEGORIES: 300, // 5 minutes for categories
     BUSINESS_PAGE: 120, // 2 minutes for business pages
     SERVICES: 180, // 3 minutes for services list
     CLIENT_STATS: 120, // 2 minutes for client stats
+    BUSINESS_OWNER: 120, // 2 minutes for /business/mine and /business/owner/:id
+    BOOKINGS_USER: 60, // 1 minute for /bookings/me
+    EMPLOYEES_BUSINESS: 180, // 3 minutes for /employees/business/:id
+    REVIEWS_BUSINESS: 300, // 5 minutes for /reviews/business/:id
   };
 
   constructor(private configService: ConfigService) {}
@@ -155,10 +161,59 @@ export class CacheService implements OnModuleInit, OnModuleDestroy {
     return `client-stats:${businessId}:${userId}`;
   }
 
+  /** /business/mine — current user's own business (auth-scoped, full payload). */
+  static businessMineKey(userId: string): string {
+    return `business:mine:${userId}`;
+  }
+
+  /** /business/owner/:userId — public variant of the same business. */
+  static businessOwnerPublicKey(userId: string): string {
+    return `business:owner-public:${userId}`;
+  }
+
+  /** /bookings/me — listing for the current user, optionally filtered. */
+  static bookingsUserKey(
+    userId: string,
+    role: string | undefined,
+    from: string | undefined,
+    to: string | undefined,
+  ): string {
+    return `bookings:user:${userId}:${role ?? '_'}:${from ?? '_'}:${to ?? '_'}`;
+  }
+
+  /** /employees/business/:id — staff list for a business (public). */
+  static employeesBusinessKey(businessId: string): string {
+    return `employees:business:${businessId}`;
+  }
+
+  /** /reviews/business/:id — reviews list for a business (public). */
+  static reviewsBusinessKey(businessId: string): string {
+    return `reviews:business:${businessId}`;
+  }
+
   /**
    * Check if caching is available
    */
   isAvailable(): boolean {
     return this.isConnected && this.redis !== null;
+  }
+
+  /**
+   * Atomically acquire a named lock with a TTL (leader election for cron jobs).
+   * Returns true if the lock was acquired by this caller.
+   *
+   * If Redis is unavailable, returns true (fail-open): the cron still runs,
+   * but may duplicate work until Redis is restored. Downstream jobs must stay
+   * idempotent. Without Redis we don't have a way to coordinate replicas.
+   */
+  async acquireLock(key: string, ttlSeconds: number): Promise<boolean> {
+    if (!this.redis || !this.isConnected) return true;
+    try {
+      const result = await this.redis.set(key, '1', 'EX', ttlSeconds, 'NX');
+      return result === 'OK';
+    } catch (error) {
+      this.logger.error(`Lock acquire error for ${key}:`, error);
+      return true;
+    }
   }
 }
